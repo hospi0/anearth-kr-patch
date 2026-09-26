@@ -127,6 +127,19 @@ def build_script(g, orig):
     return stats
 
 
+# 코드 안에 SJIS 상수로 박힌 글자(문자열 추출에 안 걸림) — (GAME.PRG 위치, 원래 코드, 한글)
+CODE_CHARS = [(0x1110E, 0x8CC2, '개')]      # 상점 수량 «１個»(실기 «1녹» — 個 칸이 한글 칸이 됨, 2026-09-27)
+
+
+def build_code_chars(g, orig):
+    m = charmap.load(); kt = kenc.kana_table(orig)
+    for off, old, ch in CODE_CHARS:
+        assert struct.unpack_from('>H', orig, off)[0] == old
+        c = m[ch]
+        struct.pack_into('>H', g, off, kt[c] if c < 0x100 else c)
+    return len(CODE_CHARS)
+
+
 def build_kbd(g, orig):
     """이름 입력 한글 자판(tools/kbd.py): 가타카나 표 → 이름 음절 칸, 음절 칸 그리기, 화면 그림 블록 제자리 교체"""
     cells, table = kbd.name_cells()
@@ -253,6 +266,7 @@ def main():
     print('대본', build_script(g, og))
     print('평문', build_plain(g, b, og), '줄')
     print('자판 음절 칸', build_kbd(g, og))
+    print('코드 속 글자', build_code_chars(g, og))
     print('검사 통과 블록', verify(g, og))
     if '--write' in sys.argv:
         write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)
