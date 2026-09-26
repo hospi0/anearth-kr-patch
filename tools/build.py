@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -69,8 +69,9 @@ def build_script(g, orig):
     tr = scriptfit.by_block()
     keys = boxes.run_keys(orig, scriptfit.blocks(), tr)
     B = boxes.load()
-    stats = {'블록': 0, '다시흘림': 0, '옮긴 블록': 0}
+    stats = {'블록': 0, '다시흘림': 0, '옮긴 블록': 0, '선택지': 0}
     errs = []
+    CH = choices.find(orig)                                     # 선택지: 항목 폭(%56) 맞춤 — 흘리기 대신
     for grp, start, end in groups.groups(orig):
         if not any(b[0] in tr for b in grp):
             continue
@@ -79,11 +80,19 @@ def build_script(g, orig):
             if off in tr:
                 out, _ = lzss.decode(orig, off + 8, ds)
                 P = scriptfit.positions(out)
-                t2 = {}
+                t2 = {}; keep = set()
                 for k, text in tr[off].items():
                     rid = '%06x:%s' % (off, k)
                     if '{c:07}' in text:
                         t2[k] = text; continue
+                    if rid in CH and '\\n' not in text:
+                        cnt, w = CH[rid]
+                        vis = len(re.sub(r'\{[^}]*\}', '', text))
+                        f = text if vis == cnt * w else choices.fit(text, cnt, w)
+                        if f is None:
+                            errs.append('선택지 %s 항목 %d×%d칸에 안 맞음: %s' % (rid, cnt, w, text)); f = text
+                        t2[k] = f; keep.add(k); stats['선택지'] += 1
+                        continue
                     jp = P[k][2]
                     W, H = B.get(keys.get(rid), (16, 4))
                     new, st = boxes.layout(text, jp, W, H)
@@ -92,7 +101,7 @@ def build_script(g, orig):
                     if st == 'rewrap':
                         stats['다시흘림'] += 1
                     t2[k] = new
-                new = scriptfit.rebuild(out, t2)
+                new = scriptfit.rebuild(out, t2, keep)
                 enc = lzss_enc.encode_cached(new)
                 blob = struct.pack('<II', len(enc), len(new)) + enc
                 stats['블록'] += 1

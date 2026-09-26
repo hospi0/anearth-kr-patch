@@ -39,8 +39,8 @@ def inner_ptrs(out):
     return found
 
 
-def rebuild(out, trs):
-    """trs: {'k:n': KO} → 새 풀린 블록 (머리 표 + 블록 안 오프셋 표를 함께 옮긴다)"""
+def rebuild(out, trs, keep=()):
+    """trs: {'k:n': KO} → 새 풀린 블록 (머리 표 + 블록 안 오프셋 표를 함께 옮긴다). keep = 공백 그대로 둘 번호(선택지 칸 채움)"""
     out = bytearray(out)
     pos = positions(bytes(out))
     t0 = struct.unpack_from('<I', out, 0)[0]
@@ -49,7 +49,7 @@ def rebuild(out, trs):
     edits = []
     for key, text in trs.items():
         s, e, jp = pos[key]
-        edits.append((s, e, kenc.enc(text, keep_space=kenc.is_fixed(jp))))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
+        edits.append((s, e, kenc.enc(text, keep_space=key in keep or kenc.is_fixed(jp))))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
     for s, e, kb in sorted(edits, reverse=True):       # 뒤에서부터 — 앞 위치가 안 흔들린다
         for i, v in ptrs:
             assert not (s <= i < e), '오프셋 표가 번역 조각 안에 있다 %x' % i
