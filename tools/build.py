@@ -133,7 +133,7 @@ def build_kbd(g, orig):
         struct.pack_into('>H', g, kbd.KATA_TABLE + 2 * (c - 0xA1), v)
         if c >= 0xA6:
             for L in kbd.NAME_LISTS:                            # 이름 화면 윗줄 표시 목록
-                assert 0x8340 <= struct.unpack_from('>H', orig, L + 2 * (c - 0xA6))[0] <= 0x8396
+                assert 0x8140 <= struct.unpack_from('>H', orig, L + 2 * (c - 0xA6))[0] <= 0x8396   # 가타카나·ー
                 struct.pack_into('>H', g, L + 2 * (c - 0xA6), v)
     cs, ds = struct.unpack_from('<II', orig, kbd.BLOCK)
     data, _ = lzss.decode(orig, kbd.BLOCK + 8, ds)
