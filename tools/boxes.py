@@ -32,7 +32,21 @@ def box_key(out, tbl, m, s):
     return '%02x:%s' % (sub, nm or '-'), bool(nm)
 
 
+NAME_W = 4          # {name:…} 자리 칸 수(주인공 이름 한글 4자 제한 — kbd.NAME_LEN, 동료 이름도 4자 이내)
+
+
+def vis(t):
+    """화면 칸 수 — 제어 0칸, 이름 자리 NAME_W 칸"""
+    t = re.sub(r'\{name:[^}]*\}', '#' * NAME_W, t)
+    t = re.sub(r'\{03:[^}]*\}', '#' * NAME_W, t)          # {01}{03} 아이템·낱말 끼움도 4칸으로 친다
+    return len(re.sub(r'\{[^}]*\}', '', t))
+
+
 def width(t):
+    return [vis(x) for x in t.split(BS)]
+
+
+def _old_width(t):
     return [len(re.sub(r'\{[^}]*\}', '', x)) for x in t.split(BS)]
 
 
@@ -74,12 +88,87 @@ def wrap(text, W, H):
     tail = re.search(r'((?:\{[^}]*\}|\\n)*)$', t[len(lead):]).group(1)
     core = t[len(lead):len(t) - len(tail)] if tail else t[len(lead):]
     lead_lines = lead.count(BS)
-    # 1) 번역자 줄바꿈을 지키고 긴 줄만 나눈다 → 2) 안 되면 색 바뀜 앞 줄바꿈(책 제목 «{c:0b}제목\n{c:0f}본문»)만 지키고 이어 흘린다
-    for paras in (core.split(BS), re.split(r'\\n(?=\{c:)', core)):
-        lines = _flow(paras, W)
-        if lines is not None and len(lines) + lead_lines <= H:
-            return lead + BS.join(lines) + tail
-    return None
+    lines = _flow_dp(core, W, H - lead_lines)
+    if lines is None:
+        return None
+    return lead + BS.join(lines) + tail
+
+
+def _pieces(core):
+    """[(조각, 앞 공백, 앞이 번역자 줄바꿈, 앞이 강제 줄바꿈)] — 낱말 단위, «‥» 뒤도 끊을 자리(공백 없이 붙음)
+       강제 줄바꿈 = 색 바뀜 앞 줄바꿈(책 제목 «{c:0b}제목\n{c:0f}본문»)"""
+    out = []
+    for hi, para in enumerate(re.split(r'\\n(?=\{c:)', core)):
+        for li, line in enumerate(para.split(BS)):
+            words = [x for x in re.split(r'[ 　]', line) if x != '']
+            for wi, w in enumerate(words):
+                parts = re.findall(r'(?:\{[^}]*\}|[^‥…])*[‥…]+(?:\{[^}]*\})*|(?:\{[^}]*\}|[^‥…])+', w)
+                for pj, pt in enumerate(parts):
+                    first = wi == 0 and pj == 0
+                    out.append((pt, pj == 0 and not first, first and li > 0, first and li == 0 and hi > 0))
+    return out
+
+
+def _flow_dp(core, W, maxlines):
+    """최적 줄 나누기(2026-09-27 «줄바꿈 좀 예쁘게») — 줄 길이를 고르게(남는 칸²), 번역자 줄바꿈·문장부호 뒤를 우선,
+       강제 줄바꿈 지킴, 줄 수 ≤ maxlines. ★글자 한복판은 안 자른다 — 조각 하나가 W 보다 길면 None"""
+    import functools
+    P = _pieces(core)
+    n = len(P)
+    if n == 0:
+        return ['']
+    wid = [vis(p[0]) for p in P]
+    if max(wid) > W:
+        return None
+
+    @functools.lru_cache(None)
+    def best(i, k):
+        if i == n:
+            return (0, ())
+        if k <= 0:
+            return None
+        res = None; w = 0
+        for j in range(i, n):
+            if j > i:
+                if P[j][3]:
+                    break
+                w += 1 if (P[j][1] or P[j][2]) else 0
+            w += wid[j]
+            if w > W:
+                break
+            rest = best(j + 1, k - 1)
+            if rest is None:
+                continue
+            end_para = j + 1 == n or P[j + 1][3]
+            c = 0 if end_para else (W - w)          # 남는 칸(선형 — 제곱은 번역자 줄바꿈을 삼키게 만든다)
+            if w < 5 and not (end_para and i == 0):
+                c += 8                                  # 너무 짧은 줄(«라이오스 / 님은…», 끝줄 «있어！» 외톨이)
+            if not end_para:
+                if P[j + 1][2]:
+                    c -= 12                             # 번역자 줄바꿈 자리
+                elif re.search(r'[.．！？!?,，‥…」』）)]$', re.sub(r'\{[^}]*\}$', '', P[j][0])):
+                    c -= 4                              # 문장부호 뒤
+                if not P[j + 1][1] and not P[j + 1][2]:
+                    c += 4                              # 공백 없이 붙은 자리(‥ 뒤)
+            c += 10 * sum(1 for q in range(i + 1, j + 1) if P[q][2])  # 번역자 줄바꿈을 삼킴
+            tot = (c + rest[0], (j + 1,) + rest[1])
+            if res is None or tot[0] < res[0]:
+                res = tot
+        return res
+
+    r = best(0, maxlines)
+    if r is None:
+        return None
+    lines = []; i = 0
+    for e in r[1]:
+        seg = ''
+        for q in range(i, e):
+            pt, sp, tb, hb = P[q]
+            if q > i and (sp or tb):
+                seg += ' '
+            seg += pt
+        lines.append(seg); i = e
+    return lines
 
 
 def _flow(paras, W):
@@ -218,10 +307,10 @@ def layout(ko, jp, W, H):
 
 def cursor_line(t, W):
     """조각을 다 찍은 뒤 커서가 있는 줄(1부터) — 엔진 자동 줄바꿈(W칸) 포함, 꽉 찬 줄 끝이면 다음 줄"""
-    lines = re.sub(r'\{[^}]*\}', '', t).split(BS)
-    n = sum(max(1, -(-len(x) // W)) for x in lines)
+    lines = [vis(x) for x in t.split(BS)]
+    n = sum(max(1, -(-x // W)) for x in lines)
     last = lines[-1]
-    if last and len(last) % W == 0:
+    if last and last % W == 0:
         n += 1
     return n
 

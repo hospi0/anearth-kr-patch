@@ -70,10 +70,11 @@ def build_script(g, orig):
     keys = boxes.run_keys(orig, scriptfit.blocks(), tr)
     B = boxes.load()
     stats = {'블록': 0, '다시흘림': 0, '옮긴 블록': 0}
+    errs = []
     for grp, start, end in groups.groups(orig):
         if not any(b[0] in tr for b in grp):
             continue
-        pos = start
+        pos = start; seg = []
         for i, (off, cs, ds, q, d) in enumerate(grp):
             if off in tr:
                 out, _ = lzss.decode(orig, off + 8, ds)
@@ -95,11 +96,14 @@ def build_script(g, orig):
                 enc = lzss_enc.encode_cached(new)
                 blob = struct.pack('<II', len(enc), len(new)) + enc
                 stats['블록'] += 1
+                seg.append('%x' % off)
             else:
                 # ★대본 아닌 블록(그림 등)은 절대 안 움직인다 — 다른 곳이 주소로 부를 수 있다(2026-09-27 방어구점 그림 사라짐)
                 if pos > off:
-                    raise SystemExit('⛔ 묶음 %x: 앞 대본이 고정 블록 %x 를 넘침 %d' % (start, off, pos - off))
+                    errs.append('묶음 %x: 고정 블록 %x 앞 대본 %s 넘침 %d' % (start, off, ' '.join(seg), pos - off))
+                    pos = off
                 g[pos:off] = bytes(off - pos)
+                seg = []
                 g[off:off + 8 + cs] = orig[off:off + 8 + cs]
                 pos = (off + 8 + cs + 3) & ~3
                 continue
@@ -113,10 +117,13 @@ def build_script(g, orig):
             pos = (e + 3) & ~3
             g[e:pos] = bytes(pos - e)                                # 정렬 틈 0
         if pos > end:
-            raise SystemExit('⛔ 묶음 %x 넘침 %d' % (start, pos - end))
+            errs.append('묶음 %x 끝: 대본 %s 넘침 %d' % (start, ' '.join(seg), pos - end))
+            continue
         # 남는 자리 0 채움(원래 블록 뒤 찌꺼기 방지) — 마지막 블록 끝 ~ 자리 끝
         last_end = pos
         g[last_end:end] = bytes(end - last_end)
+    if errs:
+        raise SystemExit('⛔ 자리 넘침 %d곳 — ' % len(errs) + ' / '.join(errs))
     return stats
 
 
@@ -135,6 +142,9 @@ def build_kbd(g, orig):
             for L in kbd.NAME_LISTS:                            # 이름 화면 윗줄 표시 목록
                 assert 0x8140 <= struct.unpack_from('>H', orig, L + 2 * (c - 0xA6))[0] <= 0x8396   # 가타카나·ー
                 struct.pack_into('>H', g, L + 2 * (c - 0xA6), v)
+    # 이름 최대 글자 수 8 → 4 (0x0603F760 `CMP/EQ #8,R0` — 0x0603FA38 가 ﾞﾟ(받침 버튼)를 빼고 센 글자 수, 사용자 결정 2026-09-27)
+    assert bytes(orig[kbd.NAME_MAX:kbd.NAME_MAX + 2]) == bytes([0x88, 0x08])
+    g[kbd.NAME_MAX:kbd.NAME_MAX + 2] = bytes([0x88, kbd.NAME_LEN])
     cs, ds = struct.unpack_from('<II', orig, kbd.BLOCK)
     data, _ = lzss.decode(orig, kbd.BLOCK + 8, ds)
     new, _ = kbd.build_sheet(data)

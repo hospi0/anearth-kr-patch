@@ -21,6 +21,8 @@ import bdf
 BLOCK = 0x4506814
 KATA_TABLE = 0x3A8DC
 NAME_LISTS = (0x3DFE0, 0x3FB5C)     # 이름 입력 화면 윗줄 표시용 SJIS 가타카나 목록(ｦ‥ﾝ 56칸) — 실기 «ホヤァ»
+NAME_MAX = 0x1F760                  # `CMP/EQ #8,R0` — 이름 글자 수 한계(ﾞﾟ 제외하고 셈)
+NAME_LEN = 4                        # 한글 4자(사용자 결정) — 대사 흘리기도 이름 자리를 4칸으로 친다(boxes.TOKW)
 NAME_BASE = 0xE047                 # 이름 음절 칸 시작(코드마다 3칸)
 F14 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri14.bdf'
 F9 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri9.bdf'
