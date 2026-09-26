@@ -134,3 +134,16 @@ def encode_best(data):
         dec, _ = lzss.decode(enc + b'\x00' * 4, 0, len(data))
         assert dec == bytes(data), '압축 되풀기 불일치'
     return min(cands, key=len)
+
+
+def encode_cached(data):
+    """encode_best + 디스크 캐시(work/cache/lz/<md5>.bin) — 같은 내용은 다시 안 누른다"""
+    import hashlib
+    d = os.path.join(os.path.dirname(HERE), 'work', 'cache', 'lz')
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, hashlib.md5(bytes(data)).hexdigest() + '.bin')
+    if os.path.exists(p):
+        return open(p, 'rb').read()
+    enc = encode_best(data)
+    open(p, 'wb').write(enc)
+    return enc

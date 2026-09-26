@@ -9,3 +9,4 @@
 !work/
 !work/text/
 !work/text/*.tsv
+!work/*.tsv

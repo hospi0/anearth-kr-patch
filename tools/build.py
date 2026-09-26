@@ -1,0 +1,221 @@
+# -*- coding: utf-8 -*-
+r"""AnEarth Fantasy Stories - The First Volume 한글 빌더
+  1) 글꼴(GAME.PRG 0x254C000, 16×16 1bpp, 칸 = SJIS 189칸/앞바이트) — work/charmap.tsv 의 음절을 갈무리14 로 그림
+     1바이트 코드(0xA1‥0xDD)는 변환표(0x3A956)가 가리키는 칸에 그린다. 。「」、・ー 6칸은 표를 제2수준 한자 칸으로 돌린다.
+  2) 대본(script.tsv) — 블록마다 번역 넣기(boxes.layout 로 창 폭·줄 수 맞춤) → 오프셋 표 옮기기 → LZSS 최적 압축(캐시)
+     → 묶음(같은 포인터 표) 안에서 차례로 다시 채우고 포인터 고침. 첫 블록은 안 움직인다.
+  3) 평문(game_plain.tsv · battle.tsv) — 제자리(원문 바이트 예산, 이름표 구역은 NUL 채움 칸까지). S 줄(전투 SJIS)은 1바이트 금지·남는 칸 전각 공백.
+  4) 트랙 1 섹터 교체 + MODE1 EDC/ECC → work/out/   (--install 이면 F: 에도)
+  ★규칙은 쓰는 순간 강제(kenc: 부호 뒤 반각 공백 삭제·반각→전각·글꼴 밖 글자 오류, boxes: 창 폭·줄 수, 예산 초과 = 오류)
+  python tools/build.py [--write] [--install]
+"""
+import hashlib, os, re, shutil, struct, sys
+import numpy as np
+HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1
+
+SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
+BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
+INSTALL = r'F:\hospi\roms\ss roms\AnEarth Fantasy Stories - The First Volume (Japan)'
+OUT_DIR = os.path.join(ROOT, 'work', 'out')
+LBA = {'GAME.PRG': 120, 'BATTLE.PRG': 36472}
+FONT = 0x254C000
+GALMURI = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri14.bdf'
+COPY_GLYPH = {'　': None, '‥': 0x8164, '！': 0x8149, '？': 0x8148, '（': 0x8169, '）': 0x816A}
+# 이름표 구역 — 문자열 뒤 NUL 채움까지 써도 된다(4바이트 정렬 칸, 2026-09-27 확인)
+PADDED = [('G', 0x16300, 0x16340), ('G', 0x1E230, 0x1E270), ('B', 0xCF30, 0xCF60), ('B', 0x24A00, 0x24E00)]
+
+
+def cell(code):
+    lead, tr = code >> 8, code & 0xFF
+    L = lead - 0x81 if lead < 0xA0 else lead - 0x81 - 0x40
+    return L * 189 + (tr - 0x40) + 64
+
+
+def glyph(F, ch):
+    pts, _ = F.draw(ch)
+    a = np.zeros((16, 16), np.uint8)
+    if pts:
+        xs = [x for x, _ in pts]; ys = [y for _, y in pts]
+        ox = (16 - (max(xs) - min(xs) + 1)) // 2 - min(xs)
+        oy = (16 - (max(ys) - min(ys) + 1)) // 2 - min(ys)
+        for x, y in pts:
+            if 0 <= x + ox < 16 and 0 <= y + oy < 16:
+                a[y + oy, x + ox] = 1
+    return np.packbits(a).tobytes()
+
+
+def build_font(g, orig):
+    m = charmap.load()
+    kt = kenc.kana_table(orig)
+    for c, tgt in charmap.ONE_REMAP.items():                      # 변환표 6칸 돌리기
+        struct.pack_into('>H', g, kenc.KANA_TABLE + 2 * (c - 0xA1), tgt)
+    F = bdf.Font(GALMURI)
+    n = 0
+    for ch, code in m.items():
+        tgt = kt[code] if code < 0x100 else code
+        o = FONT + cell(tgt) * 32
+        if ch in COPY_GLYPH:
+            src = COPY_GLYPH[ch]
+            g[o:o + 32] = bytes(32) if src is None else orig[FONT + cell(src) * 32:FONT + cell(src) * 32 + 32]
+        else:
+            g[o:o + 32] = glyph(F, ch)
+        n += 1
+    return n
+
+
+def build_script(g, orig):
+    tr = scriptfit.by_block()
+    keys = boxes.run_keys(orig, scriptfit.blocks(), tr)
+    B = boxes.load()
+    stats = {'블록': 0, '다시흘림': 0, '옮긴 블록': 0}
+    for grp, start, end in groups.groups(orig):
+        if not any(b[0] in tr for b in grp):
+            continue
+        pos = start
+        for i, (off, cs, ds, q, d) in enumerate(grp):
+            if off in tr:
+                out, _ = lzss.decode(orig, off + 8, ds)
+                P = scriptfit.positions(out)
+                t2 = {}
+                for k, text in tr[off].items():
+                    rid = '%06x:%s' % (off, k)
+                    if '{c:07}' in text:
+                        t2[k] = text; continue
+                    jp = P[k][2]
+                    W, H = B.get(keys.get(rid), (16, 4))
+                    new, st = boxes.layout(text, jp, W, H)
+                    if st == 'fail':
+                        raise SystemExit('⛔ 창에 안 들어감 %s: %s' % (rid, text))
+                    if st == 'rewrap':
+                        stats['다시흘림'] += 1
+                    t2[k] = new
+                new = scriptfit.rebuild(out, t2)
+                enc = lzss_enc.encode_cached(new)
+                blob = struct.pack('<II', len(enc), len(new)) + enc
+                stats['블록'] += 1
+            else:
+                blob = bytes(orig[off:off + 8 + cs])
+            if i == 0:
+                assert pos == off
+            elif pos != off:
+                struct.pack_into('>I', g, q, (pos + d) & 0xFFFFFFFF)
+                stats['옮긴 블록'] += 1
+            g[pos:pos + len(blob)] = blob
+            e = pos + len(blob)
+            pos = (e + 3) & ~3
+            g[e:pos] = bytes(pos - e)                                # 정렬 틈 0
+        if pos > end:
+            raise SystemExit('⛔ 묶음 %x 넘침 %d' % (start, pos - end))
+        # 남는 자리 0 채움(원래 블록 뒤 찌꺼기 방지) — 마지막 블록 끝 ~ 자리 끝
+        last_end = pos
+        g[last_end:end] = bytes(end - last_end)
+    return stats
+
+
+def verify(g, orig):
+    """결과 검사: 묶음마다 포인터를 따라가 블록 머리 → 풀기 → 소비 바이트 = 압축 크기, 대본이면 표·본문 판정, 아니면 원본과 같은 내용"""
+    tr = scriptfit.by_block()
+    bad = 0; n = 0
+    for grp, start, end in groups.groups(orig):
+        if not any(b0[0] in tr for b0 in grp):
+            continue
+        for i, (off, cs, ds, q, d) in enumerate(grp):
+            at = off if i == 0 else (struct.unpack_from('>I', g, q)[0] - d) & 0xFFFFFFFF
+            ncs, nds = struct.unpack_from('<II', g, at)
+            out, e = lzss.decode(g, at + 8, nds)
+            ok = len(out) == nds and e - (at + 8) == ncs and start <= at and at + 8 + ncs <= end
+            if off in tr:
+                ok = ok and extract.is_script(out)
+            else:
+                ok = ok and out == lzss.decode(orig, off + 8, ds)[0]
+            n += 1
+            if not ok:
+                bad += 1; print('⛔ 검사 실패', hex(off), '→', hex(at))
+    if bad:
+        raise SystemExit('⛔ 검사 실패 %d' % bad)
+    return n
+
+
+def room(d, off, n):
+    e = off + n
+    while e < len(d) and d[e] == 0:
+        e += 1
+    return e - off - 1
+
+
+def build_plain(g, b, orig):
+    kt = kenc.kana_table(orig)
+    cnt = 0
+    for name in ('game_plain.tsv', 'battle.tsv'):
+        for r in ko.rows(name):
+            if not r['ko']:
+                continue
+            tag = r['id'][0]; off = int(r['id'][1:], 16)
+            d = g if tag == 'G' else b
+            sj = tag == 'S'
+            kb = kenc.enc(r['ko'], sjis_only=sj, kt=kt)
+            cap = r['budget']
+            if any(t == ('B' if tag in 'BS' else 'G') and a <= off < z for t, a, z in PADDED):
+                cap = max(cap, room(d, off, r['budget']))
+            if len(kb) > cap:
+                raise SystemExit('⛔ 예산 초과 %s %d > %d: %s' % (r['id'], len(kb), cap, r['ko']))
+            if sj:                                              # 전투 SJIS 대사: 남는 칸 = 전각 공백(+홀수면 0x20)
+                pad = r['budget'] - len(kb)
+                kb += b'\x81\x40' * (pad // 2) + b' ' * (pad % 2)
+                d[off:off + len(kb)] = kb
+            else:
+                span = max(r['budget'], len(kb))
+                d[off:off + span] = kb + bytes(span - len(kb))
+            cnt += 1
+    return cnt
+
+
+def write_disc(files, origs, install):
+    os.makedirs(OUT_DIR, exist_ok=True)
+    t1 = os.path.join(OUT_DIR, BASE + ' (Track 1).bin')
+    shutil.copyfile(os.path.join(SRC_DIR, BASE + ' (Track 1).bin'), t1)
+    n = 0
+    with open(t1, 'r+b') as fh:
+        for name, data in files.items():
+            o = origs[name]
+            for k in range(0, len(data), 2048):
+                if data[k:k + 2048] != o[k:k + 2048]:
+                    lba = LBA[name] + k // 2048
+                    fh.seek(lba * 2352); sec = bytearray(fh.read(2352))
+                    chunk = bytes(data[k:k + 2048]); chunk += bytes(2048 - len(chunk))
+                    sec[16:16 + 2048] = chunk
+                    fh.seek(lba * 2352); fh.write(cdmode1.fix(sec)); n += 1
+    for tr in (2, 3, 4):
+        dst = os.path.join(OUT_DIR, BASE + ' (Track %d).bin' % tr)
+        if not os.path.exists(dst):
+            shutil.copyfile(os.path.join(SRC_DIR, BASE + ' (Track %d).bin' % tr), dst)
+    shutil.copyfile(os.path.join(SRC_DIR, BASE + '.cue'), os.path.join(OUT_DIR, BASE + '.cue'))
+    h = hashlib.md5(open(t1, 'rb').read()).hexdigest().upper()
+    print('섹터 %d개 교체 → %s  md5 %s' % (n, t1, h))
+    if install:
+        shutil.copyfile(t1, os.path.join(INSTALL, BASE + ' (Track 1).bin'))
+        print('설치 →', INSTALL)
+    return h
+
+
+def main():
+    sys.stdout.reconfigure(encoding='utf-8')
+    og = open(os.path.join(ROOT, 'work', 'GAME.PRG'), 'rb').read()
+    ob = open(os.path.join(ROOT, 'work', 'BATTLE.PRG'), 'rb').read()
+    g = bytearray(og); b = bytearray(ob)
+    charmap.build()                                             # 새 음절만 뒤에 붙는다
+    kenc._map = None
+    print('글꼴', build_font(g, og), '칸')
+    print('대본', build_script(g, og))
+    print('평문', build_plain(g, b, og), '줄')
+    print('검사 통과 블록', verify(g, og))
+    if '--write' in sys.argv:
+        write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)
+    else:
+        print('예행 끝 — 쓰려면 --write')
+
+
+if __name__ == '__main__':
+    main()
