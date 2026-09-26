@@ -10,12 +10,19 @@ import lzss, lzss_enc, extract, kenc, ko, bytestyle
 
 
 def positions(out):
-    """번호(blk 제외 'k:n') → (시작, 끝) — extract.main 과 같은 순서"""
+    """번호(blk 제외 'k:n') → (시작, 끝, 표기) — extract.main 과 같은 순서. LEAD[번호] = 앞에 보존할 INLINE 명령 바이트"""
     pos = {}
+    LEAD.clear()                                        # 블록마다 새로(번호 'k:n' 은 블록 안에서만 유일)
     for k, a, b in extract.messages(out):
-        for n, (s0, e0, t) in enumerate(extract.runs(out[a:b])):
+        for n, r in enumerate(extract.runs(out[a:b])):
+            s0, e0, t = r
             pos['%d:%d' % (k, n)] = (a + s0, a + e0, t)
+            if r.lead:
+                LEAD['%d:%d' % (k, n)] = r.lead
     return pos
+
+
+LEAD = {}
 
 
 def inner_ptrs(out):
@@ -49,7 +56,11 @@ def rebuild(out, trs, keep=()):
     edits = []
     for key, text in trs.items():
         s, e, jp = pos[key]
-        edits.append((s, e, kenc.enc(text, keep_space=key in keep or kenc.is_fixed(jp))))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
+        kb = kenc.enc(text, keep_space=key in keep or kenc.is_fixed(jp))
+        lead = LEAD.get(key, b'')
+        if lead and not kb.startswith(lead):
+            kb = lead + kb                              # 되찾은 앞 글자와 함께 삼킨 기다림·표정 명령 보존
+        edits.append((s, e, kb))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
     for s, e, kb in sorted(edits, reverse=True):       # 뒤에서부터 — 앞 위치가 안 흔들린다
         for i, v in ptrs:
             assert not (s <= i < e), '오프셋 표가 번역 조각 안에 있다 %x' % i

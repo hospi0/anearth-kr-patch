@@ -106,7 +106,57 @@ def runs(m):
             if g is not None and s - pe <= 24:
                 merged[-1] = (ps, e, pt + g + t); continue
         merged.append((s, e, t))
-    return merged
+    # ★조각 앞 글자 되찾기(2026-09-27 «子애들이란»): `%0a 01 84 | 8E 71(子) | 8B 9F(供)…` 에서 인수 84 가 SJIS 앞 바이트로 읽혀
+    #   8E 와 짝지어져 «子» 가 조각 밖에 남았다 → 바로 앞 명령 인수가 끝나는 자리부터 온전한 2바이트 글자가 이어지면 시작을 당긴다.
+    #   (합친 뒤에 하므로 조각 번호는 안 바뀐다)
+    #   앞 조각 끝부터 명령 길이표대로 차례로 읽어, 조각 바로 앞에 붙은 글자(사이의 INLINE 명령 포함)를 조각에 넣는다.
+    #   `%0a 00 25 | 82 C7` 처럼 인수가 0x25 라 «%» 로 오판한 경우(조각 시작이 글자 한가운데)도 이것으로 잡힌다.
+    out = []
+    for i, (s, e, t) in enumerate(merged):
+        prev_e = out[-1][1] if out else 0
+        pos, cand = prev_e, None
+        while pos < s:
+            x = m[pos]
+            if x == 0x25 and pos + 1 < len(m) and m[pos + 1] in PARSE_ARGS:
+                if m[pos + 1] not in INLINE:
+                    cand = None
+                pos += 2 + PARSE_ARGS[m[pos + 1]]
+                continue
+            if (0x81 <= x <= 0x9F or 0xE0 <= x <= 0xEF) and pos + 1 < len(m):
+                try:
+                    ch = m[pos:pos + 2].decode('cp932')
+                except UnicodeDecodeError:
+                    ch = ''
+                if len(ch) == 1 and (REAL.match(ch) or ch in '‥…！？ー「『（'):
+                    if cand is None:
+                        cand = pos
+                    pos += 2; continue
+            if 0xA6 <= x <= 0xDF:
+                if cand is None:
+                    cand = pos
+                pos += 1; continue
+            cand = None; pos += 1
+        lead = b''
+        if cand is not None and cand < s and pos in (s, s + 1):
+            q = cand                                    # 되찾은 구간 안의 INLINE 명령(기다림·표정) — 번역 앞에 보존
+            while q < s:
+                if m[q] == 0x25 and q + 1 < len(m) and m[q + 1] in INLINE:
+                    L = 2 + INLINE[m[q + 1]]; lead += m[q:q + L]; q += L
+                else:
+                    q += 1
+            s = cand; t = render(m[s:e])
+        r = Run((s, e, t)); r.lead = lead
+        out.append(r)
+    return out
+
+
+class Run(tuple):
+    """(시작, 끝, 표기) + .lead = 앞 글자를 되찾으며 삼킨 INLINE 명령 바이트"""
+    lead = b''
+
+
+PARSE_ARGS = dict(ARGLEN)
+PARSE_ARGS[0x86] = 0            # «%86» 뒤 바로 글자(«%86 ネコちゃん…» — 조각 앞 글자 되찾기 전용, 조각 번호 매기기에는 안 쓴다)
 
 
 def runs_raw(m):
