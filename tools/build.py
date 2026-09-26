@@ -155,7 +155,7 @@ def build_plain(g, b, orig):
             tag = r['id'][0]; off = int(r['id'][1:], 16)
             d = g if tag == 'G' else b
             sj = tag == 'S'
-            kb = kenc.enc(r['ko'], sjis_only=sj, kt=kt)
+            kb = kenc.enc(r['ko'], sjis_only=sj, kt=kt, keep_space=kenc.is_fixed(r['jp']))
             cap = r['budget']
             if any(t == ('B' if tag in 'BS' else 'G') and a <= off < z for t, a, z in PADDED):
                 cap = max(cap, room(d, off, r['budget']))

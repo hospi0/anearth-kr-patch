@@ -28,19 +28,29 @@ def kana_table(game):
     return t
 
 
-PUNCT_SPACE = re.compile(r'([,.!?:;，．！？：；]) (?=[^ 　])')   # 반각 공백만 — 전각 공백은 선택지·목록 칸 맞춤에 쓰인다
+PUNCT_SPACE = re.compile(r'([,.!?:;，．！？：；‥…])[ 　](?=[^ 　])')
+# ★부호(‥ 포함) 뒤 공백은 반각·전각 모두 지운다(2026-09-27 사용자 지적 — ‥ 뒤 1,416곳을 남긴 채 자리 맞추느라 문장을 줄였다).
+#   칸 맞춤 목록·선택지(원문 16칸 배수 줄)는 build 가 keep_space=True 로 부른다. 공백이 둘 이상 이어지면(칸 채움) 건드리지 않는다.
 WIDE = {' ': '　', '(': '（', ')': '）', ',': '，', '.': '．', '!': '！', '?': '？', ':': '：', ';': '；',
         '~': '～', '-': '－', '/': '／', '%': '％', '&': '＆', '+': '＋', "'": '’', '"': '”', '*': '＊'}
 
 
-def normalize(t):
-    t = PUNCT_SPACE.sub(r'\1', t)
+def normalize(t, keep_space=False):
+    if not keep_space:
+        t = PUNCT_SPACE.sub(r'\1', t)
     return t
 
 
-def enc(t, sjis_only=False, kt=None):
+def is_fixed(jp):
+    """원문이 16칸 배수 선택지 줄(전각 공백 칸 맞춤) — 채움 공백이 2개 이상 이어진 곳은 규칙이 원래 안 건드린다"""
+    jc = re.sub(r'\{[^}]*\}', '', jp)
+    return any(len(x) >= 32 and len(x) % 16 == 0 and '　' in x
+               and all(x[i + 15] in '　？' for i in range(0, len(x), 16)) for x in jc.split('\\n'))
+
+
+def enc(t, sjis_only=False, kt=None, keep_space=False):
     m = cmap()
-    t = normalize(t)
+    t = normalize(t, keep_space)
     out = bytearray()
     for tok in re.split(r'(\{[^}]*\}|\\n)', t):
         if not tok:

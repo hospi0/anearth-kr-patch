@@ -27,7 +27,7 @@ def rebuild(out, trs):
     edits = []
     for key, text in trs.items():
         s, e, jp = pos[key]
-        edits.append((s, e, kenc.enc(text)))
+        edits.append((s, e, kenc.enc(text, keep_space=kenc.is_fixed(jp))))
     for s, e, kb in sorted(edits, reverse=True):       # 뒤에서부터 — 앞 위치가 안 흔들린다
         out[s:e] = kb
         d = len(kb) - (e - s)

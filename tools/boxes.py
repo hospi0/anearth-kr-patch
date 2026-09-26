@@ -83,20 +83,28 @@ def wrap(text, W, H):
 
 
 def _flow(paras, W):
+    """낱말 단위 채우기. 낱말 안에서도 «‥» 뒤(부호 뒤 공백을 지워 붙은 곳)는 줄을 바꿀 수 있다 — 글자 한복판은 안 자른다"""
     lines = []
     for para in paras:
-        words = [w for w in re.split(r'[ 　]|\\n', para) if w != '']
+        pieces = []                                     # (조각, 앞 공백 여부)
+        for w in re.split(r'[ 　]|\\n', para):
+            if w == '':
+                continue
+            parts = re.findall(r'(?:\{[^}]*\}|[^‥…])*[‥…]+(?:\{[^}]*\})*|(?:\{[^}]*\}|[^‥…])+', w)
+            for j, pt in enumerate(parts):
+                pieces.append((pt, j == 0))
         cur, n = '', 0
-        for w in words:
-            wl = len(re.sub(r'\{[^}]*\}', '', w))
+        for pt, sp in pieces:
+            wl = len(re.sub(r'\{[^}]*\}', '', pt))
             if wl > W:
                 return None
+            add = (1 if sp else 0)
             if not cur:
-                cur, n = w, wl
-            elif n + 1 + wl <= W:
-                cur += ' ' + w; n += 1 + wl
+                cur, n = pt, wl
+            elif n + add + wl <= W:
+                cur += (' ' if sp else '') + pt; n += add + wl
             else:
-                lines.append(cur); cur, n = w, wl
+                lines.append(cur); cur, n = pt, wl
         if cur:
             lines.append(cur)
     return lines
@@ -172,7 +180,7 @@ SEG = re.compile(r'(\{0a:[0-9a-f]+\})')          # 조각 안에서 새 상자(�
 def layout(ko, jp, W, H):
     """→ (새 표기, 상태) 상태: ok 그대로 · rewrap 낱말 단위로 다시 흘림 · jpover 원문도 창 모델에 안 맞음(원문 모양 기준 검사) · fail
        원문도 안 맞는 조각(책·긴 설명 — 엔진이 알아서 접거나 다른 창)은 «원문 최대 줄 폭·줄 수» 를 창으로 삼는다."""
-    ks = SEG.split(kenc.normalize(ko)); js = SEG.split(jp)
+    ks = SEG.split(kenc.normalize(ko, kenc.is_fixed(jp))); js = SEG.split(jp)
     if len(ks) != len(js):
         js = [jp] * len(ks)
     out = []; states = set()
