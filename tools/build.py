@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -149,6 +149,18 @@ def build_code_chars(g, orig):
     return len(CODE_CHARS)
 
 
+def build_uigfx(g, orig):
+    """구운 UI 그림(메뉴 라벨·금액 «룩솔», tools/uigfx.py) — 블록 0x2454018 제자리(사용자 «완벽해» 2026-09-27)"""
+    cs, ds = struct.unpack_from('<II', orig, uigfx.BLOCK)
+    data, _ = lzss.decode(orig, uigfx.BLOCK + 8, ds)
+    new = uigfx.build(data)
+    enc = lzss_enc.encode_cached(new)
+    if len(enc) > uigfx.SLOT:
+        raise SystemExit('⛔ UI 그림 자리 넘침 %d > %d' % (len(enc), uigfx.SLOT))
+    g[uigfx.BLOCK:uigfx.BLOCK + 8 + uigfx.SLOT] = struct.pack('<II', len(enc), len(new)) + enc + bytes(uigfx.SLOT - len(enc))
+    return len(enc)
+
+
 def build_kbd(g, orig):
     """이름 입력 한글 자판(tools/kbd.py): 가타카나 표 → 이름 음절 칸, 음절 칸 그리기, 화면 그림 블록 제자리 교체"""
     cells, table = kbd.name_cells()
@@ -276,6 +288,7 @@ def main():
     print('평문', build_plain(g, b, og), '줄')
     print('자판 음절 칸', build_kbd(g, og))
     print('코드 속 글자', build_code_chars(g, og))
+    print('UI 그림 압축', build_uigfx(g, og), '/', uigfx.SLOT)
     print('검사 통과 블록', verify(g, og))
     if '--write' in sys.argv:
         write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)

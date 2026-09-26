@@ -19,7 +19,7 @@ F14 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri14.bdf'
 MENU = ['도구', '마법', '장비', '상태', '설정']
 MENU_CELL0, MENU_W, MENU_H = 1, 6, 12
 MONEY_CELL0, MONEY_W, MONEY_H = 0x50, 16, 4
-MONEY_BOX = (8, 24, 82, 124)          # 금액 창 안 «ルクソル» 자리 (y0, y1, x0, x1)
+MONEY_BOX = (8, 24, 82, 122)          # 금액 창 안 «ルクソル» 자리 (y0, y1, x0, x1) — x 122 부터는 오른쪽 금테(2026-09-27 테두리 깨짐)
 BG = (51, 52, 53, 54, 55, 56)
 
 
