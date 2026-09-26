@@ -31,12 +31,16 @@ F7P = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri7.bdf'
 # 가타카나(자판 칸) → (기본, ㄴ받침, ㅇ받침) — 받침형은 원래 탁음·반탁음이 붙던 글자에만
 VOICE_N = 'ウカキクケコサシスセソタチツテト'          # ゛ 가능(ㄴ받침)
 VOICE_NO = 'ハヒフヘホ'                               # ゛゜ 가능(ㄴ·ㅇ받침)
-PLAIN = 'アイエオナニヌネノマミムメモヤユヨワヲラリルレロンャュョッァィゥェォー'
+# 세이브·상태 화면 작은 글꼴(tools/smallfont.py)은 ｱ‥ﾘ(0xB1‥0xD8) 칸만 글자가 있다(나머지 칸은 다른 그림)
+#   → 자주 쓰는 음절은 앞(IN, 작은 글꼴에도 나옴), 드문 음절은 뒤(OUT, 세이브 화면에선 원래 게임처럼 제대로 안 나옴)
+PLAIN_IN = 'アイエオナニヌネノマミムメモヤユヨラリ'
+PLAIN_OUT = 'ワヲルレロンャュョッァィゥェォー'
+PLAIN = PLAIN_IN + PLAIN_OUT
 S_N = '가무미비사소수시오우유이저지차후'
 S_NO = '서여조주하'
-S_PLAIN = '강경김나남노류리박배백상석송스심아안양용원임장재정철최카태피허혁홍황희'   # ★하·스·피 필수(사용자 이름 «하스피»)
+S_PLAIN = '강김나노리박상석송스심아안임장정최카피' + '경남류배백양용원재철태허혁홍황희'   # ★하·스·피 필수(사용자 이름 «하스피»)
 MUST = '하스피'
-assert all(c in S_N + S_NO + S_PLAIN for c in MUST), '자판에 하·스·피 필수'
+assert all(c in S_N + S_NO + S_PLAIN[:len(PLAIN_IN)] for c in MUST), '자판에 하·스·피 필수(작은 글꼴에도 나오는 칸에)'
 assert len(VOICE_N) == len(S_N) and len(VOICE_NO) == len(S_NO) and len(PLAIN) == len(S_PLAIN), (len(PLAIN), len(S_PLAIN))
 
 

@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -161,6 +161,21 @@ def build_uigfx(g, orig):
     return len(enc)
 
 
+def build_smallfont(g, orig):
+    """세이브·상태 화면 이름 작은 글꼴(tools/smallfont.py) — 블록 0x24566F0 제자리 + 받침형 칸 코드 패치"""
+    cs, ds = struct.unpack_from('<II', orig, smallfont.BLOCK)
+    data, _ = lzss.decode(orig, smallfont.BLOCK + 8, ds)
+    new, _ = smallfont.build(data)
+    enc = lzss_enc.encode_cached(new)
+    if len(enc) > cs:
+        raise SystemExit('⛔ 작은 글꼴 블록 자리 넘침 %d > %d' % (len(enc), cs))
+    g[smallfont.BLOCK:smallfont.BLOCK + 8 + cs] = struct.pack('<II', len(enc), len(new)) + enc + bytes(cs - len(enc))
+    for off, old, nw in smallfont.PATCH:
+        assert struct.unpack_from('>H', orig, off)[0] == old
+        struct.pack_into('>H', g, off, nw)
+    return len(enc), cs
+
+
 def build_kbd(g, orig):
     """이름 입력 한글 자판(tools/kbd.py): 가타카나 표 → 이름 음절 칸, 음절 칸 그리기, 화면 그림 블록 제자리 교체"""
     cells, table = kbd.name_cells()
@@ -289,6 +304,7 @@ def main():
     print('자판 음절 칸', build_kbd(g, og))
     print('코드 속 글자', build_code_chars(g, og))
     print('UI 그림 압축', build_uigfx(g, og), '/', uigfx.SLOT)
+    print('이름 작은 글꼴 압축', build_smallfont(g, og))
     print('검사 통과 블록', verify(g, og))
     if '--write' in sys.argv:
         write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)
