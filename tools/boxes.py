@@ -202,8 +202,28 @@ def layout(ko, jp, W, H):
             states.add('fail'); out.append(k)
         else:
             states.add('rewrap'); out.append(r)
+    # ★조각 가운데 {0a:…}(이름표 찍고 새 박스)는 «지금 커서 자리» 에 이름표를 찍는다 — 원문은 그 앞에서 박스를 꽉 채우거나
+    #   줄바꿈으로 끝나 이름표가 박스 밖으로 밀려 자동으로 다음 박스가 열린다(2026-09-27 «오빠» 가 첫 박스 끝에 붙음).
+    #   → {0a} 앞 번역 조각의 커서 줄을 원문과 같게(모자라면 줄바꿈 추가)
+    if len(ks) == len(js):
+        for i in range(len(out) - 1):
+            if SEG.fullmatch(out[i + 1] or '') and out[i] and not SEG.fullmatch(out[i]):
+                need = cursor_line(js[i], W) - cursor_line(out[i], W)
+                if need > 0:
+                    out[i] = out[i] + BS * need
+                    states.add('rewrap')
     st = 'fail' if 'fail' in states else 'rewrap' if 'rewrap' in states else 'jpover' if 'jpover' in states else 'ok'
     return ''.join(out), st
+
+
+def cursor_line(t, W):
+    """조각을 다 찍은 뒤 커서가 있는 줄(1부터) — 엔진 자동 줄바꿈(W칸) 포함, 꽉 찬 줄 끝이면 다음 줄"""
+    lines = re.sub(r'\{[^}]*\}', '', t).split(BS)
+    n = sum(max(1, -(-len(x) // W)) for x in lines)
+    last = lines[-1]
+    if last and len(last) % W == 0:
+        n += 1
+    return n
 
 
 def failing():

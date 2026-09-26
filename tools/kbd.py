@@ -20,6 +20,7 @@ import bdf
 
 BLOCK = 0x4506814
 KATA_TABLE = 0x3A8DC
+NAME_LISTS = (0x3DFE0, 0x3FB5C)     # 이름 입력 화면 윗줄 표시용 SJIS 가타카나 목록(ｦ‥ﾝ 56칸) — 실기 «ホヤァ»
 NAME_BASE = 0xE047                 # 이름 음절 칸 시작(코드마다 3칸)
 F14 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri14.bdf'
 F9 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri9.bdf'
@@ -127,7 +128,7 @@ def build_sheet(data):
     # ゛·゜ = 8×8 셀 32번(゛)·33번(゜) (타일 0 의 아래 두 셀). ★셀 0 은 화면 빈 곳이 쓰는 빈 셀 — 절대 건드리지 말 것
     #   (2026-09-27 셀 0 에 «ㄴ» 을 그려 이름 화면 전체에 세로 점선이 생겼다)
     F7 = bdf.Font(F7P)
-    for cidx, ch in ((32, 'ㄴ'), (33, 'ㅇ')):
+    for cidx, ch in ((1, 'ㄴ'), (33, 'ㅇ')):          # 실기: ゛ 버튼 = 셀 1, ゜ 버튼 = 셀 33 (셀 32 는 안 씀)
         y, x = (cidx // 32) * 8, (cidx % 32) * 8
         im[y:y + 8, x:x + 8] = style(draw_glyph(F7, ch, 8, 8))
     out = im.reshape(rows, 8, cols, 8).transpose(0, 2, 1, 3).reshape(-1)
