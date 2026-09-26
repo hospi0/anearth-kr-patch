@@ -23,6 +23,7 @@ KATA_TABLE = 0x3A8DC
 NAME_BASE = 0xE047                 # 이름 음절 칸 시작(코드마다 3칸)
 F14 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri14.bdf'
 F9 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri9.bdf'
+F7P = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri7.bdf'
 
 # 가타카나(자판 칸) → (기본, ㄴ받침, ㅇ받침) — 받침형은 원래 탁음·반탁음이 붙던 글자에만
 VOICE_N = 'ウカキクケコサシスセソタチツテト'          # ゛ 가능(ㄴ받침)
@@ -30,7 +31,9 @@ VOICE_NO = 'ハヒフヘホ'                               # ゛゜ 가능(ㄴ·
 PLAIN = 'アイエオナニヌネノマミムメモヤユヨワヲラリルレロンャュョッァィゥェォー'
 S_N = '가무미비사소수시오우유이저지차후'
 S_NO = '서여조주하'
-S_PLAIN = '강경규김나남노로류리박배백상석송심아안양용원임장재정철최카태허혁홍황희'
+S_PLAIN = '강경김나남노류리박배백상석송스심아안양용원임장재정철최카태피허혁홍황희'   # ★하·스·피 필수(사용자 이름 «하스피»)
+MUST = '하스피'
+assert all(c in S_N + S_NO + S_PLAIN for c in MUST), '자판에 하·스·피 필수'
 assert len(VOICE_N) == len(S_N) and len(VOICE_NO) == len(S_NO) and len(PLAIN) == len(S_PLAIN), (len(PLAIN), len(S_PLAIN))
 
 
@@ -121,10 +124,12 @@ def build_sheet(data):
     for t, ch in todo.items():
         y, x = tile_rc(t)
         im[y:y + 16, x:x + 16] = style(draw_glyph(F, ch))
-    # 0번 = ゛(왼 8px)·゜(오른 8px) → ㄴ·ㅇ
-    y, x = tile_rc(0)
-    im[y:y + 16, x:x + 8] = style(draw_glyph(F9f, 'ㄴ', 8, 16))
-    im[y:y + 16, x + 8:x + 16] = style(draw_glyph(F9f, 'ㅇ', 8, 16))
+    # ゛·゜ = 8×8 셀 32번(゛)·33번(゜) (타일 0 의 아래 두 셀). ★셀 0 은 화면 빈 곳이 쓰는 빈 셀 — 절대 건드리지 말 것
+    #   (2026-09-27 셀 0 에 «ㄴ» 을 그려 이름 화면 전체에 세로 점선이 생겼다)
+    F7 = bdf.Font(F7P)
+    for cidx, ch in ((32, 'ㄴ'), (33, 'ㅇ')):
+        y, x = (cidx // 32) * 8, (cidx % 32) * 8
+        im[y:y + 8, x:x + 8] = style(draw_glyph(F7, ch, 8, 8))
     out = im.reshape(rows, 8, cols, 8).transpose(0, 2, 1, 3).reshape(-1)
     return out.tobytes(), im
 

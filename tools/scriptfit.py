@@ -6,7 +6,7 @@ r"""대본 블록 되쓰기(메모리 안) — 번역을 넣고 표를 옮기고
 import os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, ko
+import lzss, lzss_enc, extract, kenc, ko, bytestyle
 
 
 def positions(out):
@@ -18,21 +18,52 @@ def positions(out):
     return pos
 
 
+def inner_ptrs(out):
+    """블록 안의 두 번째 오프셋 표 — u32 LE 값이 «NUL 바로 뒤»(문자열 시작)를 가리키고 2개 이상 연속.
+    ★2026-09-27 상점 대사 «…게에 솔입니다»: `%7a XX YY ZZ` 뒤 u32 17개가 NUL 로 나뉜 상점 문구를 가리킨다 — 안 옮기면 문구 경계가 어긋난다"""
+    t0 = struct.unpack_from('<I', out, 0)[0]; n = len(out)
+    found = []
+    i = t0
+    while i < n - 8:
+        j = i; run = []
+        while j + 4 <= n:
+            v = struct.unpack_from('<I', out, j)[0]
+            if t0 < v < n and out[v - 1] == 0:
+                run.append(j); j += 4
+            else:
+                break
+        if len(run) >= 2:
+            found += run; i = j
+        else:
+            i += 1
+    return found
+
+
 def rebuild(out, trs):
-    """trs: {'k:n': KO} → 새 풀린 블록"""
+    """trs: {'k:n': KO} → 새 풀린 블록 (머리 표 + 블록 안 오프셋 표를 함께 옮긴다)"""
     out = bytearray(out)
     pos = positions(bytes(out))
     t0 = struct.unpack_from('<I', out, 0)[0]
     tbl = list(struct.unpack_from('<%dI' % (t0 // 4), out, 0))
+    ptrs = [[i, struct.unpack_from('<I', out, i)[0]] for i in inner_ptrs(out)]   # [위치, 값]
     edits = []
     for key, text in trs.items():
         s, e, jp = pos[key]
-        edits.append((s, e, kenc.enc(text, keep_space=kenc.is_fixed(jp))))
+        edits.append((s, e, kenc.enc(text, keep_space=kenc.is_fixed(jp))))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
     for s, e, kb in sorted(edits, reverse=True):       # 뒤에서부터 — 앞 위치가 안 흔들린다
+        for i, v in ptrs:
+            assert not (s <= i < e), '오프셋 표가 번역 조각 안에 있다 %x' % i
         out[s:e] = kb
         d = len(kb) - (e - s)
         tbl = [v + d if v > s else v for v in tbl]
+        for p in ptrs:
+            if p[0] > s:
+                p[0] += d
+            if p[1] > s:
+                p[1] += d
     struct.pack_into('<%dI' % len(tbl), out, 0, *tbl)
+    for i, v in ptrs:
+        struct.pack_into('<I', out, i, v)
     return bytes(out)
 
 

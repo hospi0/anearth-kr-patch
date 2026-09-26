@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -96,7 +96,13 @@ def build_script(g, orig):
                 blob = struct.pack('<II', len(enc), len(new)) + enc
                 stats['블록'] += 1
             else:
-                blob = bytes(orig[off:off + 8 + cs])
+                # ★대본 아닌 블록(그림 등)은 절대 안 움직인다 — 다른 곳이 주소로 부를 수 있다(2026-09-27 방어구점 그림 사라짐)
+                if pos > off:
+                    raise SystemExit('⛔ 묶음 %x: 앞 대본이 고정 블록 %x 를 넘침 %d' % (start, off, pos - off))
+                g[pos:off] = bytes(off - pos)
+                g[off:off + 8 + cs] = orig[off:off + 8 + cs]
+                pos = (off + 8 + cs + 3) & ~3
+                continue
             if i == 0:
                 assert pos == off
             elif pos != off:
@@ -176,7 +182,7 @@ def build_plain(g, b, orig):
                 continue
             tag = r['id'][0]; off = int(r['id'][1:], 16)
             d = g if tag == 'G' else b
-            sj = tag == 'S'
+            sj = tag == 'S' or not bytestyle.has_one_byte(bytes(d[off:off + r['budget']]))   # 원문이 2바이트뿐이면 2바이트만
             kb = kenc.enc(r['ko'], sjis_only=sj, kt=kt, keep_space=kenc.is_fixed(r['jp']))
             cap = r['budget']
             if any(t == ('B' if tag in 'BS' else 'G') and a <= off < z for t, a, z in PADDED):

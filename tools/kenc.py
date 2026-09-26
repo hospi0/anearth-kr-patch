@@ -48,8 +48,21 @@ def is_fixed(jp):
                and all(x[i + 15] in '　？' for i in range(0, len(x), 16)) for x in jc.split('\\n'))
 
 
+_kt = None
+
+
+def default_kt():
+    global _kt
+    if _kt is None:
+        import os
+        _kt = kana_table(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'work', 'GAME.PRG'), 'rb').read())
+    return _kt
+
+
 def enc(t, sjis_only=False, kt=None, keep_space=False):
     m = cmap()
+    if sjis_only and kt is None:
+        kt = default_kt()
     t = normalize(t, keep_space)
     out = bytearray()
     for tok in re.split(r'(\{[^}]*\}|\\n)', t):
