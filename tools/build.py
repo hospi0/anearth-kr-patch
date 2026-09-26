@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -114,6 +114,28 @@ def build_script(g, orig):
     return stats
 
 
+def build_kbd(g, orig):
+    """이름 입력 한글 자판(tools/kbd.py): 가타카나 표 → 이름 음절 칸, 음절 칸 그리기, 화면 그림 블록 제자리 교체"""
+    cells, table = kbd.name_cells()
+    F = bdf.Font(GALMURI)
+    for code, s in cells:
+        o = FONT + cell(code) * 32
+        g[o:o + 32] = glyph(F, s)
+    by = {s: c for c, s in cells}
+    table[0xA1] = by['카']                                  # 기본 이름 «카심»(대사 표 1바이트 카 = 0xA1)
+    for c, v in table.items():
+        struct.pack_into('>H', g, kbd.KATA_TABLE + 2 * (c - 0xA1), v)
+    cs, ds = struct.unpack_from('<II', orig, kbd.BLOCK)
+    data, _ = lzss.decode(orig, kbd.BLOCK + 8, ds)
+    new, _ = kbd.build_sheet(data)
+    enc = lzss_enc.encode_cached(new)
+    room = 9656                                             # 다음 블록(0x4508DD4) 전까지
+    if len(enc) > room:
+        raise SystemExit('⛔ 자판 그림 자리 넘침 %d > %d' % (len(enc), room))
+    g[kbd.BLOCK:kbd.BLOCK + 8 + room] = struct.pack('<II', len(enc), len(new)) + enc + bytes(room - len(enc))
+    return len(cells)
+
+
 def verify(g, orig):
     """결과 검사: 묶음마다 포인터를 따라가 블록 머리 → 풀기 → 소비 바이트 = 압축 크기, 대본이면 표·본문 판정, 아니면 원본과 같은 내용"""
     tr = scriptfit.by_block()
@@ -210,6 +232,7 @@ def main():
     print('글꼴', build_font(g, og), '칸')
     print('대본', build_script(g, og))
     print('평문', build_plain(g, b, og), '줄')
+    print('자판 음절 칸', build_kbd(g, og))
     print('검사 통과 블록', verify(g, og))
     if '--write' in sys.argv:
         write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)
