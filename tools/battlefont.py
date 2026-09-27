@@ -104,20 +104,31 @@ def encode(s, enc):
     return out
 
 
-def stub_code(check_off):
-    """0x0602CC54 에 넣을 기계어 — 목록 첫 칸 VRAM 워드 확인 후 전체 복사(개수 0 이면 바로 돌아감)"""
+def stub_code(check_off, j, off2):
+    """0x0602CC54 에 넣을 기계어 — 목록 첫 칸(가나 칸)과 j 번째 칸(우리 빈 VRAM 구역의 첫 칸) 두 곳의 워드를 확인해
+    하나라도 다르면 목록 전체를 VRAM 에 복사(개수 0 이면 바로 돌아감).
+    ★2026-09-27 정적 확인: 0x06023532 가 0x25E48A00 + n×0x80 (+0x800) 에 쓴다 — n≥24 면 우리 구역. 덮여도 다음 이름 표시에 다시 복사되게."""
     w = []; fix = {}
-    w += [None]                     # MOV.L @(L_blob,PC),R1 — 나중에
+    w += [None]                     # MOV.L @(L_blob,PC),R1
     w += [0x6216]                   # MOV.L @R1+,R2   (개수)
     w += [0x2228]                   # TST R2,R2
-    fix['bt0'] = len(w); w += [None]    # BT done (데이터가 없으면 — 2026-09-27 Address Error 교훈)
+    fix['done0'] = len(w); w += [None]  # BT done
     w += [0x6512]                   # MOV.L @R1,R5    (첫 칸 주소)
     w += [0x7500 | check_off]       # ADD #off,R5
     w += [0x6052]                   # MOV.L @R5,R0
     w += [0x5710 | ((4 + check_off) // 4)]  # MOV.L @(4+off,R1),R7
     w += [0x3070]                   # CMP/EQ R7,R0
-    fix['bt1'] = len(w); w += [None]    # BT done
-    loop = len(w) * 2
+    fix['copy0'] = len(w); w += [None]  # BF copy
+    fix['lw'] = len(w); w += [None]     # MOV.W @(L_j,PC),R0   (j×68)
+    w += [0x301C]                   # ADD R1,R0
+    w += [0x6502]                   # MOV.L @R0,R5    (j 번째 칸 주소)
+    w += [0x7500 | off2]            # ADD #off2,R5
+    w += [0x5700 | ((4 + off2) // 4) | (0 << 4)]  # MOV.L @(4+off2,R0),R7
+    w += [0x6552]                   # MOV.L @R5,R5
+    w += [0x3570]                   # CMP/EQ R7,R5
+    fix['done1'] = len(w); w += [None]  # BT done
+    copy = len(w) * 2
+    loop = copy
     w += [0x6516]                   # MOV.L @R1+,R5
     w += [0xE710]                   # MOV #16,R7
     inner = len(w) * 2
@@ -127,12 +138,15 @@ def stub_code(check_off):
     bf2 = len(w) * 2; w += [0x8B00 | (((loop - bf2 - 4) // 2) & 0xFF)]
     done = len(w) * 2
     w += [0x000B, 0x6033]           # RTS · MOV R3,R0
-    for k in ('bt0', 'bt1'):
+    lw_at = len(w) * 2; w += [j * 68]   # .W j×68
+    for k in ('done0', 'done1'):
         i = fix[k]; w[i] = 0x8900 | (((done - i * 2 - 4) // 2) & 0xFF)
+    i = fix['copy0']; w[i] = 0x8B00 | (((copy - i * 2 - 4) // 2) & 0xFF)
+    i = fix['lw']; w[i] = 0x9000 | ((lw_at - i * 2 - 4) // 2)
     if len(w) % 2:
         w.append(0x0009)
     lit = len(w) * 2
-    assert (STUB + lit) % 4 == 0
+    assert (STUB + lit) % 4 == 0 and j * 68 < 0x8000 and 4 + off2 <= 60
     w[0] = 0xD100 | ((lit - 4) // 4)
     return b''.join(struct.pack('>H', x) for x in w) + struct.pack('>I', BLOB + 3 * 512)
 
@@ -155,7 +169,9 @@ def build(b, g, state_vram=None):
     o = FONT_FILE + BLOB_OFF
     g[o:o + len(blob)] = blob                          # GAME.PRG 글꼴 영역 뒷부분(→ Low RAM 0x002FA000)
     struct.pack_into('>I', b, T_B - LOAD, BLOB); struct.pack_into('>I', b, T_D - LOAD, BLOB + 512); struct.pack_into('>I', b, T_P - LOAD, BLOB + 1024)
-    code = stub_code(off)
+    j = next(i for i, (a, _) in enumerate(data) if a == SINGLE[0][0])      # 우리 빈 VRAM 구역 첫 칸(적 이름 음절)
+    off2 = next(o for o in range(0, 56, 4) if data[j][1][o:o + 4] != bytes(4))
+    code = stub_code(off, j, off2)
     assert STUB + len(code) <= OLD_B + 0x200
     b[STUB - LOAD:STUB - LOAD + len(code)] = code
     assert struct.unpack_from('>H', b, FUNC_END - LOAD)[0] == 0x000B
