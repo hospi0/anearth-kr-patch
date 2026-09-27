@@ -16,20 +16,58 @@ BS = '\\n'
 PATH = os.path.join(ROOT, 'work', 'boxes.tsv')
 
 
-def box_key(out, tbl, m, s):
-    """본문 조각 앞의 상자 키 — '종류:이름' / '종류:-' / 'none'"""
+def _label(out, tbl, arg, strict=False):
+    if arg >= len(tbl) or tbl[arg] >= len(out):
+        return None
+    a = tbl[arg]; mm = out[a:a + 60]
+    j = mm.find(b'%\x04\x07')
+    if strict:                                          # 순수 이름표 메시지만: (%5b/%05/%4b …) %04 07 이름 [\] %04 0f … 끝(짧음)
+        end = tbl[arg + 1] if arg + 1 < len(tbl) else len(out)
+        if not 0 <= j <= 12 or end - a > 48:
+            return None
+        k = mm.find(b'%\x04\x0f', j)
+        nm = mm[j + 3:k].rstrip(b'\x5c') if k > 0 else b''
+        return extract.render(nm) if nm and b'%' not in nm else None
+    if 0 <= j <= 12:
+        k = mm.find(b'\x5c', j)
+        return extract.render(mm[j + 3:k]) if k > 0 else None
+    return None
+
+
+def box_key(out, tbl, m, s, sibs=()):
+    """본문 조각 앞의 상자 키 — '종류:이름' / '종류:-' / 'none'
+    ★이름표 메시지는 같은 블록이 아니라 «같은 장면 묶음의 다른 블록»에 있을 수 있다(2026-09-27 실기: 올가·마리아 초상화 창을
+      이름 없는 16칸 창으로 알고 흘려 엔진이 13칸째에서 자동 줄바꿈 → «싶지/만», «호/릭스도»). sibs = 같은 묶음 블록의 (풀림, 표)"""
     p = m.rfind(b'%\x0a', 0, s)
     if p < 0 or p + 3 >= len(m):
         return 'none', False
     sub, arg = m[p + 2], m[p + 3]
-    nm = None
-    if arg < len(tbl):
-        a = tbl[arg]; mm = out[a:a + 60]
-        j = mm.find(b'%\x04\x07')
-        if 0 <= j <= 12:
-            k = mm.find(b'\x5c', j)
-            nm = extract.render(mm[j + 3:k]) if k > 0 else None
+    nm = _label(out, tbl, arg) or _label(out, tbl, arg, strict=True)
+    for o2, t2 in sibs:
+        if nm:
+            break
+        nm = _label(o2, t2, arg, strict=True)
     return '%02x:%s' % (sub, nm or '-'), bool(nm)
+
+
+_SIBS = {}
+
+
+def siblings(g, off):
+    """같은 장면 묶음(groups)의 다른 블록들 [(풀림, 오프셋 표)]"""
+    if not _SIBS:
+        import groups
+        dec = {}
+        for grp, start, end in groups.groups(g):
+            offs = [b[0] for b in grp]
+            for o in offs:
+                if o not in dec:
+                    cs, ds = struct.unpack_from('<II', g, o); d, _ = lzss.decode(g, o + 8, ds)
+                    t0 = struct.unpack_from('<I', d, 0)[0]
+                    dec[o] = (d, struct.unpack_from('<%dI' % (t0 // 4), d, 0)) if t0 % 4 == 0 and 4 <= t0 <= len(d) else None
+            for o in offs:
+                _SIBS.setdefault(o, []).extend(dec[x] for x in offs if x != o and dec[x])
+    return _SIBS.get(off, [])
 
 
 NAME_W = 4          # {name:…} 자리 칸 수(주인공 이름 한글 4자 제한 — kbd.NAME_LEN, 동료 이름도 4자 이내)
@@ -64,7 +102,7 @@ def learn(g, blocks, tr):
             for s, e, t in extract.runs(m):
                 if '{c:07}' in t:
                     continue
-                key, lab = box_key(out, tbl, m, s)
+                key, lab = box_key(out, tbl, m, s, siblings(g, off))
                 labeled[key] = lab
                 if BS in t:
                     for x in width(t.rstrip(BS)):
@@ -205,6 +243,14 @@ def fits(text, W, H):
     return max(ws) <= W and len(ws) - (1 if t.endswith(BS) else 0) <= H
 
 
+def size(B, key, ko, jp):
+    """(폭, 줄 수) — 원문이 «\\n» 으로 시작하면 이름표 줄 끝의 개행이라(이름표 메시지에 개행 없음) 줄 하나 더"""
+    W, H = B.get(key, (16, 4))
+    if ko.startswith(BS) and jp.startswith(BS):
+        H += 1
+    return W, H
+
+
 def load():
     return {k: (int(w), int(h)) for k, w, h in (l.rstrip('\n').split('\t') for l in open(PATH, encoding='utf-8') if not l.startswith('#'))}
 
@@ -238,7 +284,7 @@ def run_keys(g, blocks, tr):
         for k, a, b in extract.messages(out):
             m = out[a:b]
             for n, (s, e, t) in enumerate(extract.runs(m)):
-                keys['%06x:%d:%d' % (off, k, n)] = box_key(out, tbl, m, s)[0]
+                keys['%06x:%d:%d' % (off, k, n)] = box_key(out, tbl, m, s, siblings(g, off))[0]
     return keys
 
 
@@ -253,7 +299,9 @@ def report():
     for r in ko.rows('script.tsv'):
         if not r['ko'] or '{c:07}' in r['ko']:
             continue
-        W, H = B.get(keys.get(r['id']), (16, 4))
+        if r['ko'] == r['jp']:
+            continue
+        W, H = size(B, keys.get(r['id']), r['ko'], r['jp'])
         new, st = layout(r['ko'], r['jp'], W, H)
         cnt[st] += 1
         if st == 'fail' and len(ex) < 40:
@@ -326,7 +374,9 @@ def failing():
     for r in ko.rows('script.tsv'):
         if not r['ko'] or '{c:07}' in r['ko']:
             continue
-        W, H = B.get(keys.get(r['id']), (16, 4))
+        if r['ko'] == r['jp']:
+            continue
+        W, H = size(B, keys.get(r['id']), r['ko'], r['jp'])
         new, st = layout(r['ko'], r['jp'], W, H)
         if st == 'fail':
             k = (r['ko'], W, H)

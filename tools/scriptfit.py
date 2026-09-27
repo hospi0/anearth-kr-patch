@@ -60,6 +60,8 @@ def rebuild(out, trs, keep=()):
         lead = LEAD.get(key, b'')
         if lead and not kb.startswith(lead):
             kb = lead + kb                              # 되찾은 앞 글자와 함께 삼킨 기다림·표정 명령 보존
+        if out[e:e + 2] == b'\x25\x0e' and not kb.endswith(b'\x40'):
+            kb += b'\x40'       # 버튼 대기 «@» 없이 창 닫기(%0e) — 원본부터 22곳, 실기 «대사창 바로 사라짐»(2026-09-27)
         edits.append((s, e, kb))   # 대본은 대사 렌더러(0x0602900C, 1바이트 처리) — 2바이트 규칙은 평문만
     for s, e, kb in sorted(edits, reverse=True):       # 뒤에서부터 — 앞 위치가 안 흔들린다
         for i, v in ptrs:

@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont, uigfx2, savegfx, bookgfx
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -94,7 +94,9 @@ def build_script(g, orig):
                         t2[k] = f; keep.add(k); stats['선택지'] += 1
                         continue
                     jp = P[k][2]
-                    W, H = B.get(keys.get(rid), (16, 4))
+                    if text == jp:                              # 번역 안 한 줄(디버그 «ＭＡＰ０１…» 등) — 원문 그대로
+                        t2[k] = text; continue
+                    W, H = boxes.size(B, keys.get(rid), text, jp)
                     new, st = boxes.layout(text, jp, W, H)
                     if st == 'fail':
                         raise SystemExit('⛔ 창에 안 들어감 %s: %s' % (rid, text))
@@ -166,6 +168,8 @@ def build_smallfont(g, orig):
     cs, ds = struct.unpack_from('<II', orig, smallfont.BLOCK)
     data, _ = lzss.decode(orig, smallfont.BLOCK + 8, ds)
     new, _ = smallfont.build(data)
+    new = bookgfx.build(new)                                    # 같은 블록의 마법책 주문 이름(힐링·언록·서치·텔레포트, 진한/흐린 판)
+    GFX[smallfont.BLOCK] = new
     enc = lzss_enc.encode_cached(new)
     if len(enc) > cs:
         raise SystemExit('⛔ 작은 글꼴 블록 자리 넘침 %d > %d' % (len(enc), cs))
@@ -174,6 +178,38 @@ def build_smallfont(g, orig):
         assert struct.unpack_from('>H', orig, off)[0] == old
         struct.pack_into('>H', g, off, nw)
     return len(enc), cs
+
+
+GFX = {}        # 그림 단계가 바꾼 블록 → 새 풀림(verify 가 원본 대신 이것과 비교)
+
+
+def inplace(g, orig, off, fn, slot=None, name=''):
+    """압축 블록 하나를 제자리에서 바꾼다 — 자리 = slot(다음 자료까지 잰 값) 또는 원래 압축 크기"""
+    cs, ds = struct.unpack_from('<II', orig, off)
+    data, _ = lzss.decode(orig, off + 8, ds)
+    new = fn(data)
+    assert len(new) == ds, (name, len(new), ds)
+    enc = lzss_enc.encode_cached(new)
+    room = slot or cs
+    if len(enc) > room:
+        raise SystemExit('⛔ %s 그림 자리 넘침 %d > %d' % (name, len(enc), room))
+    g[off:off + 8 + room] = struct.pack('<II', len(enc), len(new)) + enc + bytes(room - len(enc))
+    GFX[off] = new
+    return '%s %d/%d' % (name, len(enc), room)
+
+
+def build_gfx2(g, orig):
+    """2026-09-27 사용자 판정 받은 구운 그림: 선택된 메뉴 라벨·상점 «룩솔»(uigfx2) · 세이브 탭·«L·R 로 전환»(savegfx)
+       (마법책 주문 이름은 작은 글꼴과 같은 블록 — build_smallfont 에서)"""
+    res = [inplace(g, orig, uigfx2.HL_BLOCK, uigfx2.build_hl, uigfx2.HL_SLOT, '선택 메뉴'),
+           inplace(g, orig, uigfx2.SHOP_BLOCK, uigfx2.build_shop, None, '상점 룩솔'),
+           inplace(g, orig, savegfx.LR_BLOCK, savegfx.build_lr, None, 'L·R')]
+    da = lzss.decode(orig, savegfx.TAB_A + 8, struct.unpack_from('<II', orig, savegfx.TAB_A)[1])[0]
+    db = lzss.decode(orig, savegfx.TAB_B + 8, struct.unpack_from('<II', orig, savegfx.TAB_B)[1])[0]
+    na, nb = savegfx.build_tabs(da, db)
+    res.append(inplace(g, orig, savegfx.TAB_A, lambda d: na, None, '세이브 탭A'))
+    res.append(inplace(g, orig, savegfx.TAB_B, lambda d: nb, None, '세이브 탭B'))
+    return ' · '.join(res)
 
 
 def build_kbd(g, orig):
@@ -220,7 +256,7 @@ def verify(g, orig):
             if off in tr:
                 ok = ok and extract.is_script(out)
             else:
-                ok = ok and out == lzss.decode(orig, off + 8, ds)[0]
+                ok = ok and out == GFX.get(off, lzss.decode(orig, off + 8, ds)[0])
             n += 1
             if not ok:
                 bad += 1; print('⛔ 검사 실패', hex(off), '→', hex(at))
@@ -304,7 +340,8 @@ def main():
     print('자판 음절 칸', build_kbd(g, og))
     print('코드 속 글자', build_code_chars(g, og))
     print('UI 그림 압축', build_uigfx(g, og), '/', uigfx.SLOT)
-    print('이름 작은 글꼴 압축', build_smallfont(g, og))
+    print('이름 작은 글꼴·마법책 압축', build_smallfont(g, og))
+    print('그림2', build_gfx2(g, og))
     print('검사 통과 블록', verify(g, og))
     if '--write' in sys.argv:
         write_disc({'GAME.PRG': g, 'BATTLE.PRG': b}, {'GAME.PRG': og, 'BATTLE.PRG': ob}, '--install' in sys.argv)
