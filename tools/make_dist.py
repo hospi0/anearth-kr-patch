@@ -12,7 +12,7 @@ VER = 'v0.9'
 XDELTA = r'C:\claude\utils\xdelta.exe'
 BIN = build.BASE + ' (Track 1).bin'
 NAME = 'AnEarth_KR_' + VER
-TITLE = 'AnEarth Fantasy Stories - The First Volume (새턴 일본판) 한글 패치 ' + VER
+TITLE = '세가 새턴 에이너스 판타지 스토리즈 - 더 퍼스트 볼륨 한글 패치 ' + VER
 
 
 def md5(p):
