@@ -25,8 +25,17 @@ def names(g=None):
             e = g.index(b'\0', p)
             if e == p:
                 break
-            _names.append(P.get(p)); p = e + 1
+            _names.append(P.get(p)); _widths.append((e - p + 1) // 2); p = e + 1
     return _names
+
+
+_widths = []
+
+
+def width(x, g=None):
+    """화면 폭(칸) — 이름 목록은 원문 길이만큼 전각 공백으로 채워져 있어(개수로 찾는 목록이라 줄일 수 없다) 원문 폭을 차지한다"""
+    N = names(g)
+    return max(_widths[x], len(N[x] or '')) if x < len(_widths) else None
 
 
 def jong(s):

@@ -80,8 +80,8 @@ def vis(t):
     #   (2026-09-27 전엔 {03} 을 4칸·{01} 을 0칸으로 쳐서 «…넣었다» 뒤 «！» 가 다음 상자로 넘어갔다)
     def item(m):
         import josa
-        N = josa.names(); x = int(m.group(1), 16)
-        return '#' * (len(N[x]) if x < len(N) and N[x] else NAME_W)
+        x = int(m.group(1), 16); w = josa.width(x)
+        return '#' * (w or NAME_W)                     # 원문 폭(공백 채움 포함) — 2026-09-27 실기 «실버 코인   [아이콘]을…»
     t = re.sub(r'\{01:07([0-9a-f]{2})\}', item, t)
     t = re.sub(r'\{01:[^}]*\}', '#' * NAME_W, t)
     t = re.sub(r'\{03:[^}]*\}', '##', t)
@@ -273,8 +273,10 @@ NOTICE_SHORT = [(r'([을를]) 손에 넣었다(！?)$', r' 획득！'), (r'([을
 
 def notice_fit(t, jp, W, H):
     """알림 창(제목+1줄)에 안 들어가면 아이템 획득 문구를 «○○ 획득！» 으로 줄인다(josa.resolve 뒤 문자열)"""
+    if not is_notice(jp):
+        return t
     new, st = layout(t, jp, W, H)
-    if st != 'fail' or not is_notice(jp):
+    if st != 'fail' and '{01:07' not in t:         # 아이템 획득 알림은 늘 «○○ 획득！»(사용자 2026-09-27 «다 조사도 없애고 획득으로»)
         return t
     for a, b in NOTICE_SHORT:
         t2 = re.sub(a, b, t)
