@@ -30,6 +30,11 @@ EXTRA = '샤올베트릴'                         # 동료 이름(카심·나샤
 MENU_NAMES = [(0x16308, 0x1630C, '카심'), (0x1630C, 0x16314, '나샤'), (0x16314, 0x1631C, '올가'), (0x1631C, 0x16324, '베스트릴')]
 PATCH = [(0x163F8, 0x8D1D, 0x8D07)] + list(zip(range(0x1640A, 0x1641C, 2), [0x002E] * 9,
          [0x603C, 0xE1E0, 0x611C, 0x3012, 0x8B01, 0x6803, 0x78B5, 0xA00D, 0x0009]))
+# ★저장 화면은 같은 함수의 두 번째 사본(0x0603E268, 기호 갈래 0x1E340 — 바이트 동일)과 두 번째 이름 표(0x1E230, 포인터 0x1E254)를 쓴다
+#   (2026-09-27 실기: 저장 화면 동료 이름이 «혁»). 두 사본 모두 위치 무관 코드라 같은 패치를 +0x7F50 에, 표는 +0x7F30 에.
+SAVE_D, SAVE_T = 0x1E340 - 0x163F0, 0x1E230 - 0x16300
+PATCH += [(a + SAVE_D, o, n) for a, o, n in PATCH]
+MENU_NAMES += [(a + SAVE_T, z + SAVE_T, n) for a, z, n in MENU_NAMES]
 
 
 def menu_bytes(s):
