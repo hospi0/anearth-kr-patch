@@ -76,7 +76,15 @@ NAME_W = 4          # {name:…} 자리 칸 수(주인공 이름 한글 4자 제
 def vis(t):
     """화면 칸 수 — 제어 0칸, 이름 자리 NAME_W 칸"""
     t = re.sub(r'\{name:[^}]*\}', '#' * NAME_W, t)
-    t = re.sub(r'\{03:[^}]*\}', '#' * NAME_W, t)          # {01}{03} 아이템·낱말 끼움도 4칸으로 친다
+    # {01:07XX} = 아이템 이름(번호로 번역 이름 길이를 안다, tools/josa.py) · {03:00XX} = 아이콘(실기: 이름 뒤 틈 + 16px) → 2칸
+    #   (2026-09-27 전엔 {03} 을 4칸·{01} 을 0칸으로 쳐서 «…넣었다» 뒤 «！» 가 다음 상자로 넘어갔다)
+    def item(m):
+        import josa
+        N = josa.names(); x = int(m.group(1), 16)
+        return '#' * (len(N[x]) if x < len(N) and N[x] else NAME_W)
+    t = re.sub(r'\{01:07([0-9a-f]{2})\}', item, t)
+    t = re.sub(r'\{01:[^}]*\}', '#' * NAME_W, t)
+    t = re.sub(r'\{03:[^}]*\}', '##', t)
     return len(re.sub(r'\{[^}]*\}', '', t))
 
 
@@ -301,8 +309,10 @@ def report():
             continue
         if r['ko'] == r['jp']:
             continue
-        W, H = size(B, keys.get(r['id']), r['ko'], r['jp'])
-        new, st = layout(r['ko'], r['jp'], W, H)
+        import josa
+        t = josa.resolve(r['ko'], g)                     # 빌더와 같게 — 조사 먼저 고른다
+        W, H = size(B, keys.get(r['id']), t, r['jp'])
+        new, st = layout(t, r['jp'], W, H)
         cnt[st] += 1
         if st == 'fail' and len(ex) < 40:
             ex.append((r['id'], W, H, r['ko']))
@@ -376,8 +386,10 @@ def failing():
             continue
         if r['ko'] == r['jp']:
             continue
-        W, H = size(B, keys.get(r['id']), r['ko'], r['jp'])
-        new, st = layout(r['ko'], r['jp'], W, H)
+        import josa
+        t = josa.resolve(r['ko'], g)                     # 빌더와 같게 — 조사 먼저 고른다
+        W, H = size(B, keys.get(r['id']), t, r['jp'])
+        new, st = layout(t, r['jp'], W, H)
         if st == 'fail':
             k = (r['ko'], W, H)
             res.setdefault(k, [r['jp'], []])[1].append(r['id'])

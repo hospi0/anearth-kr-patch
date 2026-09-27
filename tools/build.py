@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont, uigfx2, savegfx, bookgfx
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont, uigfx2, savegfx, bookgfx, josa
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -83,6 +83,7 @@ def build_script(g, orig):
                 t2 = {}; keep = set()
                 for k, text in tr[off].items():
                     rid = '%06x:%s' % (off, k)
+                    text = josa.resolve(text, orig)             # 아이템 이름 끼움 뒤 «을(를)» → 받침 따라 을/를(tools/josa.py)
                     if '{c:07}' in text:
                         t2[k] = text; continue
                     if rid in CH and '\\n' not in text:
@@ -94,7 +95,11 @@ def build_script(g, orig):
                         t2[k] = f; keep.add(k); stats['선택지'] += 1
                         continue
                     jp = P[k][2]
-                    if text == jp:                              # 번역 안 한 줄(디버그 «ＭＡＰ０１…» 등) — 원문 그대로
+                    f = choices.refit(jp, text) if rid not in CH else None
+                    if f:                                       # 들여쓰기+줄 폭 선택지(%05 ff %07 %56) — 원문 꼴대로 채움
+                        t2[k] = f; keep.add(k); stats['선택지'] += 1
+                        continue
+                    if text == jp:                             # 번역 안 한 줄(디버그 «ＭＡＰ０１…» 등) — 원문 그대로
                         t2[k] = text; continue
                     W, H = boxes.size(B, keys.get(rid), text, jp)
                     new, st = boxes.layout(text, jp, W, H)
@@ -253,8 +258,10 @@ def verify(g, orig):
             ncs, nds = struct.unpack_from('<II', g, at)
             out, e = lzss.decode(g, at + 8, nds)
             ok = len(out) == nds and e - (at + 8) == ncs and start <= at and at + 8 + ncs <= end
-            if off in tr:
-                ok = ok and extract.is_script(out)
+            if off in tr:                                       # 표 구조로 판정(가나 개수 기준은 한글화 뒤 짧은 블록에서 떨어진다 — 0x19EDFBC)
+                t0 = struct.unpack_from('<I', out, 0)[0] if len(out) >= 4 else 0
+                ok = ok and 8 <= t0 < len(out) and t0 % 4 == 0 and \
+                    all(t0 <= v <= len(out) for v in struct.unpack_from('<%dI' % (t0 // 4), out, 0)) and out[t0:].count(b'%') >= 5
             else:
                 ok = ok and out == GFX.get(off, lzss.decode(orig, off + 8, ds)[0])
             n += 1
