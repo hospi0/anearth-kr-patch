@@ -21,7 +21,35 @@ BASE = 0
 BG = 47
 F7 = r'C:\claude\utils\font\Galmuri-v2.40.3\Galmuri7.bdf'
 GRAD = [159, 159, 102, 101, 99, 97, 97]
-PATCH = []          # 7차의 «받침형도 기본 칸» 패치는 철회(받침형 칸에 ㄴ·ㅇ 형을 그린다)
+# ★메뉴 동료 이름(2026-09-27): 메뉴 이름 함수는 GAME 0x16300 표(포인터 목록 0x16324, 메뉴 전용)를 이 글꼴로 그린다.
+#   번역 이름은 자판 코드(1바이트)로 쓰고, 자판에 없는 음절은 안 쓰던 코드 0xE0‥ → 빈 칸(✕) 0x95‥ 로.
+#   코드 패치: 0x060363F8 기호 갈래의 «그 밖» 분기를 기호 점프 표 안(0x21‥0x29 칸 — 이름에 안 나옴)에 넣은 20바이트로:
+#     R0=EXTU.B R3; R0>=0xE0 이면 R8=R0−0x4B(칸) → 0x06036436(칸 찍기)
+EXTRA_BASE, EXTRA_CODE = 0x95, 0xE0
+EXTRA = '샤올베트릴'                         # 동료 이름(카심·나샤·올가·베스트릴) 중 자판에 없는 음절 — 칸 0x95‥0x99(5칸이 전부)
+MENU_NAMES = [(0x16308, 0x1630C, '카심'), (0x1630C, 0x16314, '나샤'), (0x16314, 0x1631C, '올가'), (0x1631C, 0x16324, '베스트릴')]
+PATCH = [(0x163F8, 0x8D1D, 0x8D07)] + list(zip(range(0x1640A, 0x1641C, 2), [0x002E] * 9,
+         [0x603C, 0xE1E0, 0x611C, 0x3012, 0x8B01, 0x6803, 0x78B5, 0xA00D, 0x0009]))
+
+
+def menu_bytes(s):
+    """동료 이름 → 메뉴 표 바이트(자판 코드 + ﾞﾟ / 0xE0‥)"""
+    m, _ = kbd.name_map()
+    inv = {}
+    for code, (b, n, o) in m.items():
+        inv[b] = bytes([code])
+        if n:
+            inv[n] = bytes([code, 0xDE])
+        if o:
+            inv[o] = bytes([code, 0xDF])
+    out = b''
+    for ch in s:
+        if ch in inv:
+            out += inv[ch]
+        else:
+            assert ch in EXTRA, '메뉴 이름 음절 %s — 자판에도 EXTRA 에도 없음' % ch
+            out += bytes([EXTRA_CODE + EXTRA.index(ch)])
+    return out
 
 
 def glyph7(F, ch):
@@ -71,6 +99,10 @@ def build(data):
         used[r8] = ch
         o = BASE + r8 * 64
         d[o:o + 64] = cell(F, ch).tobytes()
+    for i, ch in enumerate(EXTRA):
+        r8 = EXTRA_BASE + i
+        assert r8 not in used and EXTRA_CODE + i - 0x4B == r8
+        d[BASE + r8 * 64:BASE + r8 * 64 + 64] = cell(F, ch).tobytes()
     return bytes(d), []
 
 

@@ -181,8 +181,12 @@ def build_smallfont(g, orig):
         raise SystemExit('⛔ 작은 글꼴 블록 자리 넘침 %d > %d' % (len(enc), cs))
     g[smallfont.BLOCK:smallfont.BLOCK + 8 + cs] = struct.pack('<II', len(enc), len(new)) + enc + bytes(cs - len(enc))
     for off, old, nw in smallfont.PATCH:
-        assert struct.unpack_from('>H', orig, off)[0] == old
+        assert struct.unpack_from('>H', orig, off)[0] == old, hex(off)
         struct.pack_into('>H', g, off, nw)
+    for a, b, s in smallfont.MENU_NAMES:                        # 메뉴 전용 동료 이름 표(0x16300) — 작은 글꼴 코드로(평문 단계 결과를 덮는다)
+        kb = smallfont.menu_bytes(s)
+        assert len(kb) < b - a, (s, kb)
+        g[a:b] = kb + bytes(b - a - len(kb))
     return len(enc), cs
 
 
