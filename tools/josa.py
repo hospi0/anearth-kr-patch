@@ -76,6 +76,18 @@ def resolve(text, g=None):
     return ''.join(out)
 
 
+PREV = re.compile(rb'%\x01\x07(.)(?:%\x03\x00.|%\x04.)*$', re.S)
+
+
+def resolve_lead(text, prev, g=None):
+    """조각이 조사로 시작하고 조각 바로 앞 바이트가 `%01 07 XX`(번호 고정 끼움)면 그 이름으로 고른다.
+       ★조각 앞이 메시지 끝(00)이면 게임이 실행 중에 이름을 끼우는 것(상점 등) — 여기선 못 고른다(문장을 조사 없이 쓸 것)"""
+    m = PREV.search(prev)
+    if not m:
+        return text
+    return resolve('{01:07%02x}' % m.group(1)[0] + text, g)[len('{01:07xx}'):]
+
+
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     n = 0

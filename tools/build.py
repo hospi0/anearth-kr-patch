@@ -84,6 +84,7 @@ def build_script(g, orig):
                 for k, text in tr[off].items():
                     rid = '%06x:%s' % (off, k)
                     text = josa.resolve(text, orig)             # 아이템 이름 끼움 뒤 «을(를)» → 받침 따라 을/를(tools/josa.py)
+                    text = josa.resolve_lead(text, out[max(0, P[k][0] - 16):P[k][0]], orig)   # 끼움이 조각 바로 앞에 있는 경우
                     if '{c:07}' in text:
                         t2[k] = text; continue
                     if rid in CH and '\\n' not in text:
