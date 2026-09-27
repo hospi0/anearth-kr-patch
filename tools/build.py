@@ -13,7 +13,7 @@ import hashlib, os, re, shutil, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont, uigfx2, savegfx, bookgfx, josa
+import lzss, lzss_enc, extract, kenc, charmap, boxes, groups, scriptfit, ko, bdf, cdmode1, kbd, bytestyle, choices, uigfx, smallfont, uigfx2, savegfx, bookgfx, josa, battlefont
 
 SRC_DIR = r'C:\claude\roms\ss\AnEarth Fantasy Stories - The First Volume (Japan)'
 BASE = 'AnEarth Fantasy Stories - The First Volume (Japan)'
@@ -174,7 +174,7 @@ def build_smallfont(g, orig):
     cs, ds = struct.unpack_from('<II', orig, smallfont.BLOCK)
     data, _ = lzss.decode(orig, smallfont.BLOCK + 8, ds)
     new, _ = smallfont.build(data)
-    new = bookgfx.build(new)                                    # 같은 블록의 마법책 주문 이름(힐링·언록·서치·텔레포트, 진한/흐린 판)
+    new = bookgfx.build(new)                                    # 같은 블록의 마법책 주문 이름(힐링·언락·서치·텔레포트, 진한/흐린 판)
     GFX[smallfont.BLOCK] = new
     enc = lzss_enc.encode_cached(new)
     if len(enc) > cs:
@@ -349,6 +349,8 @@ def main():
     print('글꼴', build_font(g, og), '칸')
     print('대본', build_script(g, og))
     print('평문', build_plain(g, b, og), '줄')
+    enc, nc, ne, nb = battlefont.build(b)                       # 전투 이름(적·동료·주인공) 한글 — BATTLE 코드 패치(tools/battlefont.py)
+    print('전투 이름: 칸', nc, '적 이름', ne, '데이터', nb, 'B')
     print('자판 음절 칸', build_kbd(g, og))
     print('코드 속 글자', build_code_chars(g, og))
     print('UI 그림 압축', build_uigfx(g, og), '/', uigfx.SLOT)
