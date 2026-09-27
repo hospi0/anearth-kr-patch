@@ -349,7 +349,7 @@ def main():
     print('글꼴', build_font(g, og), '칸')
     print('대본', build_script(g, og))
     print('평문', build_plain(g, b, og), '줄')
-    enc, nc, ne, nb = battlefont.build(b)                       # 전투 이름(적·동료·주인공) 한글 — BATTLE 코드 패치(tools/battlefont.py)
+    enc, nc, ne, nb = battlefont.build(b, g)                       # 전투 이름(적·동료·주인공) 한글 — BATTLE 코드 패치(tools/battlefont.py)
     print('전투 이름: 칸', nc, '적 이름', ne, '데이터', nb, 'B')
     print('자판 음절 칸', build_kbd(g, og))
     print('코드 속 글자', build_code_chars(g, og))

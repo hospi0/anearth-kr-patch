@@ -25,8 +25,11 @@ T_D, T_P, T_B = 0x0602CF00, 0x0602CF04, 0x0602CF08      # 표 주소 상수 자�
 OLD_D, OLD_P, OLD_B = 0x0602CD14, 0x0602CC54, 0x0602CCB4
 FUNC_END = 0x0602CF0C
 STUB = 0x0602CC54                                        # 옛 표 자리(참조는 위 상수 3개뿐 — 확인)
-BLOB = 0x0606A500                                        # 힙 빈 블록 앞쪽
-BLOB_END = 0x0606FF00
+# ★2026-09-27 실기 «Address Error»: BATTLE.PRG 는 초기화된 데이터(파일 ~0x45950)까지만 올라온다 — 0x0606A500 은 로드 범위 밖(전부 0)
+#   → 표·칸 데이터는 GAME.PRG 16×16 글꼴 영역(파일 0x254C000‥+0x3E000 → Low RAM 0x002C2000‥0x00300000, 전투 중에도 상주)의
+#     안 쓰는 뒷부분(글꼴 오프셋 0x38000‥ = JIS E7xx 이후, 번역 글자는 0x8DCA·이름 칸 E047‥ 까지만)에 둔다.
+FONT_FILE, FONT_RAM, BLOB_OFF, BLOB_MAX = 0x254C000, 0x002C2000, 0x38000, 0x3DD00
+BLOB = FONT_RAM + BLOB_OFF
 DUAL = (0x4B400, 0x4BA00)                                # +0x4800 도 빈 창(두 사본)
 SINGLE = [(0x49E00, 0x4B400), (0x4BA00, 0x4D000)]
 COPY1 = 0x4800                                           # 기준 0x2240 − 0x2000 = 0x240 문자 = 0x4800 바이트
@@ -102,16 +105,18 @@ def encode(s, enc):
 
 
 def stub_code(check_off):
-    """0x0602CC54 에 넣을 기계어 — 목록 첫 칸 VRAM 워드 확인 후 전체 복사"""
-    w = []
-    w += [None]                     # 0: MOV.L @(L_blob,PC),R1 — 나중에
-    w += [0x6216]                   # 2: MOV.L @R1+,R2   (개수)
-    w += [0x6512]                   # 4: MOV.L @R1,R5    (첫 칸 주소)
-    w += [0x7500 | check_off]       # 6: ADD #off,R5
-    w += [0x6052]                   # 8: MOV.L @R5,R0
-    w += [0x5710 | ((4 + check_off) // 4)]  # A: MOV.L @(4+off,R1),R7
-    w += [0x3070]                   # C: CMP/EQ R7,R0
-    w += [None]                     # E: BT done
+    """0x0602CC54 에 넣을 기계어 — 목록 첫 칸 VRAM 워드 확인 후 전체 복사(개수 0 이면 바로 돌아감)"""
+    w = []; fix = {}
+    w += [None]                     # MOV.L @(L_blob,PC),R1 — 나중에
+    w += [0x6216]                   # MOV.L @R1+,R2   (개수)
+    w += [0x2228]                   # TST R2,R2
+    fix['bt0'] = len(w); w += [None]    # BT done (데이터가 없으면 — 2026-09-27 Address Error 교훈)
+    w += [0x6512]                   # MOV.L @R1,R5    (첫 칸 주소)
+    w += [0x7500 | check_off]       # ADD #off,R5
+    w += [0x6052]                   # MOV.L @R5,R0
+    w += [0x5710 | ((4 + check_off) // 4)]  # MOV.L @(4+off,R1),R7
+    w += [0x3070]                   # CMP/EQ R7,R0
+    fix['bt1'] = len(w); w += [None]    # BT done
     loop = len(w) * 2
     w += [0x6516]                   # MOV.L @R1+,R5
     w += [0xE710]                   # MOV #16,R7
@@ -122,17 +127,17 @@ def stub_code(check_off):
     bf2 = len(w) * 2; w += [0x8B00 | (((loop - bf2 - 4) // 2) & 0xFF)]
     done = len(w) * 2
     w += [0x000B, 0x6033]           # RTS · MOV R3,R0
-    w[7] = 0x8900 | (((done - 0xE - 4) // 2) & 0xFF)
+    for k in ('bt0', 'bt1'):
+        i = fix[k]; w[i] = 0x8900 | (((done - i * 2 - 4) // 2) & 0xFF)
     if len(w) % 2:
         w.append(0x0009)
     lit = len(w) * 2
     assert (STUB + lit) % 4 == 0
-    w[0] = 0xD100 | ((lit - ((0 + 4) & ~3)) // 4)
-    code = b''.join(struct.pack('>H', x) for x in w) + struct.pack('>I', BLOB + 3 * 512)
-    return code
+    w[0] = 0xD100 | ((lit - 4) // 4)
+    return b''.join(struct.pack('>H', x) for x in w) + struct.pack('>I', BLOB + 3 * 512)
 
 
-def build(b, state_vram=None):
+def build(b, g, state_vram=None):
     """b = BATTLE.PRG bytearray(원본 복사본) — 제자리 수정. 반환 (코드표, 칸 수)"""
     enc, (NT, ND, NP), cells = plan(bytes(b))
     F = bdf.Font(smallfont.F7)
@@ -146,9 +151,9 @@ def build(b, state_vram=None):
     off = next(o for o in range(0, 60, 4) if first[o:o + 4] != bytes(4) and (state_vram is None or first[o:o + 4] != state_vram[data[0][0] + o:data[0][0] + o + 4]))
     blob = b''.join(struct.pack('>256H', *t) for t in (NT, ND, NP)) + struct.pack('>I', len(data))
     blob += b''.join(struct.pack('>I', 0x25E00000 + a) + d for a, d in data)
-    o = BLOB - LOAD
-    assert BLOB + len(blob) <= BLOB_END and not any(b[o:o + len(blob)]), '블롭 자리 넘침/0 아님'
-    b[o:o + len(blob)] = blob
+    assert BLOB_OFF + len(blob) <= BLOB_MAX, '블롭 자리 넘침'
+    o = FONT_FILE + BLOB_OFF
+    g[o:o + len(blob)] = blob                          # GAME.PRG 글꼴 영역 뒷부분(→ Low RAM 0x002FA000)
     struct.pack_into('>I', b, T_B - LOAD, BLOB); struct.pack_into('>I', b, T_D - LOAD, BLOB + 512); struct.pack_into('>I', b, T_P - LOAD, BLOB + 1024)
     code = stub_code(off)
     assert STUB + len(code) <= OLD_B + 0x200
@@ -178,7 +183,8 @@ BG1 = bytes.fromhex('36353535363635353535363535353635353636353635353635363635353
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     b = bytearray(open(os.path.join(ROOT, 'work', 'BATTLE.PRG'), 'rb').read())
-    enc, nc, ne, nb = build(b)
+    g = bytearray(open(os.path.join(ROOT, 'work', 'GAME.PRG'), 'rb').read())
+    enc, nc, ne, nb = build(b, g)
     print('칸', nc, '적 이름', ne, '블롭', nb, '바이트')
     import sh2dis
     print('\n'.join(sh2dis.dis(STUB, 26, bytes(b))))
