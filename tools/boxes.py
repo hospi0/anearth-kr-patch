@@ -256,7 +256,31 @@ def size(B, key, ko, jp):
     W, H = B.get(key, (16, 4))
     if ko.startswith(BS) and jp.startswith(BS):
         H += 1
+    # ★«ＴＲＥＡＳＵＲＥ»·«ＴＯＯＬ» 같은 영문 제목 알림(원문 본문 1줄)은 제목+본문 1줄짜리 작은 창
+    #   (2026-09-27 실기: «구세의 부적[아이콘]을 / 손에 넣었다！» 가 둘째 줄로 넘어가 다음 상자로 밀림)
+    if is_notice(jp):
+        W, H = 16, 2
     return W, H
+
+
+def is_notice(jp):
+    return bool(re.match(r'(?:\{[^}]*\})*\{c:0b\}[Ａ-Ｚ　]+\\n', jp)) and jp.count(BS) == 1
+
+
+NOTICE_SHORT = [(r'([을를]) 손에 넣었다(！?)$', r' 획득！'), (r'([을를]) ([０-９]개) 받았다！$', r' \2 획득！'),
+                (r'([을를]) ([０-９]개) 손에 넣었다！?$', r' \2 획득！'), (r'([을를]) 받았다！$', r' 획득！')]
+
+
+def notice_fit(t, jp, W, H):
+    """알림 창(제목+1줄)에 안 들어가면 아이템 획득 문구를 «○○ 획득！» 으로 줄인다(josa.resolve 뒤 문자열)"""
+    new, st = layout(t, jp, W, H)
+    if st != 'fail' or not is_notice(jp):
+        return t
+    for a, b in NOTICE_SHORT:
+        t2 = re.sub(a, b, t)
+        if t2 != t:
+            return t2
+    return t
 
 
 def load():
@@ -312,6 +336,7 @@ def report():
         import josa
         t = josa.resolve(r['ko'], g)                     # 빌더와 같게 — 조사 먼저 고른다
         W, H = size(B, keys.get(r['id']), t, r['jp'])
+        t = notice_fit(t, r['jp'], W, H)
         new, st = layout(t, r['jp'], W, H)
         cnt[st] += 1
         if st == 'fail' and len(ex) < 40:
@@ -389,6 +414,7 @@ def failing():
         import josa
         t = josa.resolve(r['ko'], g)                     # 빌더와 같게 — 조사 먼저 고른다
         W, H = size(B, keys.get(r['id']), t, r['jp'])
+        t = notice_fit(t, r['jp'], W, H)
         new, st = layout(t, r['jp'], W, H)
         if st == 'fail':
             k = (r['ko'], W, H)

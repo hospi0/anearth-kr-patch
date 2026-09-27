@@ -103,6 +103,7 @@ def build_script(g, orig):
                     if text == jp:                             # 번역 안 한 줄(디버그 «ＭＡＰ０１…» 등) — 원문 그대로
                         t2[k] = text; continue
                     W, H = boxes.size(B, keys.get(rid), text, jp)
+                    text = boxes.notice_fit(text, jp, W, H)        # 영문 제목 알림(제목+1줄): 넘치면 «○○ 획득！»
                     new, st = boxes.layout(text, jp, W, H)
                     if st == 'fail':
                         raise SystemExit('⛔ 창에 안 들어감 %s: %s' % (rid, text))
